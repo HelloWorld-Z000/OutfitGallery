@@ -27,7 +27,7 @@ const std::map<std::string,std::string> japanese{
  {"Wear only the accessories to register. Save photo: L3.","登録したい小物だけを身につけて撮影：左スティック押し込み（L3）"},
  {"No equipped accessories to save.","保存できる小物を装備していません。"},
  {"Accessory slots changed. Register this set again.","小物の使用スロットが変更されています。登録し直してください。"},
- {"Save outfit","装備を登録"},{"Save head equipment","頭装備を登録"},
+ {"Save outfit","装備を登録"},{"Save headgear","頭装備を登録"},
  {"Save outfit and photo: F9 / Y","装備と写真を保存：F9 / Y"},
  {"Save head equipment and photo: gamepad X","頭装備と写真を保存：ゲームパッド X"},
  {"Head equipment slots","頭装備モードの対象スロット"},{"Head equipment","頭装備"},{"Legacy parts","旧・部分装備"},

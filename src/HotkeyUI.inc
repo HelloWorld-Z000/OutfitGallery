@@ -80,7 +80,7 @@ void RenderHotkeys() {
     if(UI::SliderFloat(Label("Hold duration"),&seconds,.4f,3.f,"%.1f s")) padHoldSeconds=seconds;
     if(UI::IsItemDeactivatedAfterEdit()) ApplyHotkeys(hotkey.load(),gamepadHotkey.load(),padHoldSeconds.load());
     if(UI::CollapsingHeader(Label("Capture keys"))) {
-        const char* names[]{"Save outfit","Save head equipment","Save accessories"};
+        const char* names[]{"Save outfit","Save headgear","Save accessories"};
         for(unsigned n=0;n<3;++n) {
             UI::Text("%s: %s",Tr(names[n]),CaptureHint(n).c_str());
             if(UI::Button((std::string(Tr("Keyboard"))+"##capture"+std::to_string(n)).c_str())) {bindingMode=3+n*2;bindingDeadline=GetTickCount64()+10000;}

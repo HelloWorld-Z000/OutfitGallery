@@ -15,7 +15,7 @@
 
 using namespace REL::literals;
 SKSEPluginInfo(
-    .Version = "1.0.1.0"_v,
+    .Version = "1.0.2.0"_v,
     .Name = "OutfitGallery",
     .Author = "Outfit Gallery contributors",
     .RuntimeCompatibility = { "1.5.97.0"_v, "1.6.353.0"_v, "1.6.640.0"_v, "1.6.1130.0"_v, "1.6.1170.0"_v }
@@ -375,7 +375,20 @@ void RenderCameraSettings() {
 }
 void RenderCameraSlots() {
     UI::BeginDisabled(saveBusy);
-    UI::SameLine(); UI::TextUnformatted(Tr("Camera presets"));
+    // A font-independent camera label keeps the toolbar compact in both languages.
+    const float side=UI::GetFrameHeight();
+    if(UI::GetWindowPos().x+UI::GetWindowWidth()-UI::GetStyle()->WindowPadding.x-UI::GetItemRectMax().x>side+UI::GetStyle()->ItemSpacing.x) UI::SameLine();
+    UI::InvisibleButton("##cameraPresetsLabel",{side,side});
+    const auto a=UI::GetItemRectMin();
+    auto* draw=UI::GetWindowDrawList();
+    const auto color=UI::GetColorU32(UI::ImGuiCol_Text);
+    const float stroke=std::max(1.f,side*.055f);
+    UI::ImDrawListManager::AddRect(draw,{a.x+side*.10f,a.y+side*.30f},{a.x+side*.90f,a.y+side*.82f},color,side*.06f,0,stroke);
+    UI::ImDrawListManager::AddLine(draw,{a.x+side*.30f,a.y+side*.30f},{a.x+side*.37f,a.y+side*.17f},color,stroke);
+    UI::ImDrawListManager::AddLine(draw,{a.x+side*.37f,a.y+side*.17f},{a.x+side*.63f,a.y+side*.17f},color,stroke);
+    UI::ImDrawListManager::AddLine(draw,{a.x+side*.63f,a.y+side*.17f},{a.x+side*.70f,a.y+side*.30f},color,stroke);
+    UI::ImDrawListManager::AddCircle(draw,{a.x+side*.50f,a.y+side*.56f},side*.17f,color,20,stroke);
+    if(UI::IsItemHovered()) UI::SetTooltip("%s",Tr("Camera presets"));
     for(int n=0;n<7;++n) {
         if(UI::GetWindowPos().x+UI::GetWindowWidth()-UI::GetStyle()->WindowPadding.x-UI::GetItemRectMax().x>UI::GetFrameHeight()+UI::GetStyle()->ItemSpacing.x) UI::SameLine();
         if(n==cameraSlot) UI::PushStyleColor(UI::ImGuiCol_Button,{.55f,.43f,.19f,1.f});
@@ -432,7 +445,7 @@ void __stdcall RenderStudio() {
         UI::EndDisabled();
         UI::SameLine();
         UI::BeginDisabled(saveBusy);
-        if(UI::Button(Label("Save head equipment")) && !saveBusy.exchange(true)) {
+        if(UI::Button(Label("Save headgear")) && !saveBusy.exchange(true)) {
             {std::scoped_lock lock(presetsMutex); requestedName=name;} command=5;
         }
         if(UI::IsItemHovered()) UI::SetTooltip("%s\n%s",Tr("Register head equipment. Applying keeps clothes and weapons."),CaptureHint(1).c_str());
@@ -515,7 +528,7 @@ void __stdcall RenderStudio() {
 
 void __stdcall RenderSettings() {
     RenderHotkeys();
-    UI::TextUnformatted(Tr("Outfit Gallery 1.0.1 - photo presets"));
+    UI::TextUnformatted(Tr("Outfit Gallery 1.0.2 - photo presets"));
     UI::TextWrapped(Tr("Close this menu and press the configured hotkey (default F8) while standing in a safe open area."));
     UI::TextUnformatted(Tr("F9 in the studio saves a photo and equipment. Click a preset photo to apply."));
     UI::Text(Tr("SmoothCam API: %s / TDM API: %s"), smooth ? "ready" : "not available", tdm ? "ready" : "not available");
@@ -647,7 +660,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
     Gallery::saveHotkey = GetPrivateProfileIntW(L"Input", L"SaveHotkey", 67, ini.c_str());
     Gallery::captureKeys[0]=Gallery::saveHotkey;
     Gallery::gamepadHotkey = GetPrivateProfileIntW(L"Input", L"GamepadHotkey", 32, ini.c_str());
-    SKSE::log::info("OutfitGallery 1.0.1 release; runtime {}; key={}", runtime.string(), Gallery::hotkey.load());
+    SKSE::log::info("OutfitGallery 1.0.2 release; runtime {}; key={}", runtime.string(), Gallery::hotkey.load());
     return SKSE::GetMessagingInterface()->RegisterListener(Gallery::Message);
 }
 

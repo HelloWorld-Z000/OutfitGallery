@@ -1,4 +1,5 @@
-OutfitGallery 1.0.1
-Build PASS; CTest 2/2 PASS
-Drag guides: not verified in game
-DLL SHA256: 84D732E0DE1CCE8D11C140C81D87EF1B98D0DC6E1D1EE66C42FD3BF5CAD3670E
+OutfitGallery 1.0.2
+Build PASS; CTest 2/2 PASS (PortraitPngCrop, PresetPersistence)
+1.0.1 drag guides: confirmed in game by user
+1.0.2 camera toolbar: not verified in game; check English/Japanese and smaller resolutions
+DLL SHA256: 1086CCA984B4D3CA6C7E0ED5DCC9CAFC00363AF42311567745CC1EE6471A7443
