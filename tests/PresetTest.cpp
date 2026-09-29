@@ -12,6 +12,11 @@ int main() {
         WritePreset(p,folder/"valid.json");
         auto q=ReadPreset(folder/"valid.json");
         if(q.name!=p.name || q.items.size()!=3 || q.items[0].localID!=0xABC || q.items[1].hand!="left" || q.items[2].plugin!="Sword.esl") throw std::runtime_error("round trip failed");
+        auto legacy=q;
+        legacy.items.push_back({"MissingArrows.esp",0x800,"Arrows","ammo",""});
+        const auto clothing=ClothingPreset(legacy);
+        if(clothing.items.size()!=1 || clothing.items[0].kind!="armor" || legacy.items.size()!=4 || clothing.photo!=legacy.photo) throw std::runtime_error("Legacy weapons/ammo were not excluded without changing saved data");
+        if(!SameEquipment(clothing,ClothingPreset(p))) throw std::runtime_error("Legacy hand equipment affects clothing verification");
         auto rejects=[&](Preset bad) { try { WritePreset(bad,folder/"bad.json"); } catch(const std::exception&) { return; } throw std::runtime_error("accepted invalid preset"); };
         if(q.slotMask) throw std::runtime_error("Legacy outfit became partial");
         if(q.accessories) throw std::runtime_error("Legacy outfit became accessory set");
@@ -19,6 +24,7 @@ int main() {
         WritePreset(accessories,folder/"accessories.json");
         const auto accessoryCopy=ReadPreset(folder/"accessories.json");
         if(!accessoryCopy.accessories || accessoryCopy.slotMask!=0x60 || !SameEquipment(accessories,accessoryCopy)) throw std::runtime_error("Accessory set roundtrip failed");
+        if(!SameEquipment(accessories,ClothingPreset(accessories)) || !ClothingPreset(accessories).accessories || ClothingPreset(accessories).slotMask!=0x60) throw std::runtime_error("Clothing filter changed accessory scope");
         for(const auto& category:std::vector<std::string>{"","favorites","#head","#legacy"}) if(CollectionFits(2,category,true)) throw std::runtime_error("Accessory photo leaked to other collections");
         if(!CollectionFits(2,"#accessories",true) || !CollectionFits(2,"#trash",true) || CollectionFits(2,"#accessories",false)) throw std::runtime_error("Accessory isolation failed");
         auto invalidAccessories=accessories; invalidAccessories.slotMask=0; rejects(invalidAccessories);
@@ -45,6 +51,15 @@ int main() {
         bool caught=false; try { ReadPreset(folder/"broken.json"); } catch(const std::exception&) { caught=true; }
         if(!caught) throw std::runtime_error("accepted broken JSON");
         StudioSettings settings{219.916f,64.189f,-6.545f,.350f,60.846f,4};
+        auto lowCamera=settings; lowCamera.height=-20;
+        WriteStudioSettings(lowCamera,folder/"low-camera.json");
+        CameraBank lowBank{}; lowBank[2]=lowCamera;
+        WriteCameraBank(lowBank,folder/"low-bank.json");
+        if(ReadStudioSettings(folder/"low-camera.json").height!=-20 || ReadCameraBank(folder/"low-bank.json")[2]->height!=-20) throw std::runtime_error("Lower camera range did not persist");
+        lowCamera.height=-21;
+        bool lowRejected=false;
+        try {WriteStudioSettings(lowCamera,folder/"low-camera.json");} catch(const std::exception&) {lowRejected=true;}
+        if(!lowRejected || ReadStudioSettings(folder/"low-camera.json").height!=-20) throw std::runtime_error("Invalid camera height overwrote valid settings");
         settings.startupTab="custom-7";
         WriteStudioSettings(settings,folder/"opening-settings.json");
         if(ReadStudioSettings(folder/"opening-settings.json").startupTab!="custom-7") throw std::runtime_error("Opening tab not persisted");

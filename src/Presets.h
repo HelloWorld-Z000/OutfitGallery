@@ -34,6 +34,14 @@ StudioSettings ReadStudioSettings(const std::filesystem::path&);
 void WriteStudioSettings(const StudioSettings&, const std::filesystem::path&);
 struct Item { std::string plugin; std::uint32_t localID{}; std::string name; std::string kind; std::string hand; };
 struct Preset { std::string name; std::string photo; std::vector<Item> items; std::uint32_t slotMask{}; bool accessories{}; };
+// Old presets may contain weapons/ammo. Keep their files readable, but never
+// apply those entries or include them in post-apply verification.
+inline Preset ClothingPreset(const Preset& source) {
+    auto result=source;
+    result.items.clear();
+    for(const auto& item:source.items) if(item.kind=="armor") result.items.push_back(item);
+    return result;
+}
 inline bool SlotIntersects(std::uint32_t item, std::uint32_t scope) {return (item & scope)!=0;}
 inline bool SlotFits(std::uint32_t item, std::uint32_t scope) {return item && (item & ~scope)==0;}
 inline bool CollectionFits(std::uint32_t scope,const std::string& category,bool accessories=false) {

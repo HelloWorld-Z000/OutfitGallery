@@ -30,18 +30,15 @@ Preset SnapshotEquipment(std::uint32_t slotMask) {
     p.slotMask=slotMask;
     for (const auto& [obj, data] : player->GetInventory()) {
         const auto& [count, entry] = data;
-        if (!obj || count <= 0 || !entry || !entry->IsWorn() || Kind(obj).empty()) continue;
+        if (!obj || count <= 0 || !entry || !entry->IsWorn() || !obj->As<RE::TESObjectARMO>()) continue;
         if(slotMask) {
             const auto* armor=obj->As<RE::TESObjectARMO>();
             if(!armor || !SlotIntersects(armor->GetSlotMask().underlying(),slotMask)) continue;
             if(!SlotFits(armor->GetSlotMask().underlying(),slotMask)) throw std::runtime_error("Item uses unselected slots: "+std::string(obj->GetName()));
         }
-        if (obj->As<RE::TESObjectWEAP>()) {
-            if (entry->IsWorn(false)) p.items.push_back(Encode(obj,"right"));
-            if (entry->IsWorn(true)) p.items.push_back(Encode(obj,"left"));
-        } else p.items.push_back(Encode(obj,""));
+        p.items.push_back(Encode(obj,""));
     }
-    if (p.items.empty()) throw std::runtime_error("No equipped armor, weapons or ammunition to save");
+    if (p.items.empty()) throw std::runtime_error("No equipped armor or clothing to save");
     return p;
 }
 Preset SnapshotAccessories() {
@@ -59,7 +56,9 @@ Preset SnapshotAccessories() {
     if(p.items.empty()) throw std::runtime_error("No equipped accessories to save.");
     return p;
 }
-std::string ApplyEquipment(const Preset& p, bool addMissing) {
+std::string ApplyEquipment(const Preset& source, bool addMissing) {
+    const auto p=ClothingPreset(source);
+    if(p.items.empty()) throw std::runtime_error("No equipped armor or clothing to save");
     BeginManagedAddition();
     auto* player = RE::PlayerCharacter::GetSingleton();
     auto* manager = RE::ActorEquipManager::GetSingleton();
@@ -103,7 +102,7 @@ std::string ApplyEquipment(const Preset& p, bool addMissing) {
     // Use each worn instance when unequipping; never destroy inventory items.
     for (const auto& [obj,data] : inventory) {
         const auto& entry = data.second;
-        if (!obj || !entry || !entry->extraLists || Kind(obj).empty()) continue;
+        if (!obj || !entry || !entry->extraLists || !obj->As<RE::TESObjectARMO>()) continue;
         if(p.slotMask) {
             const auto* armor=obj->As<RE::TESObjectARMO>();
             if(!armor || !SlotIntersects(armor->GetSlotMask().underlying(),p.slotMask)) continue;

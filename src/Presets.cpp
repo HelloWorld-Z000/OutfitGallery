@@ -46,7 +46,7 @@ void ValidateSettings(const StudioSettings& s) {
     if(s.headSlots & ~0x1803u) throw std::runtime_error("Invalid head slots");
     if(s.language<0 || s.language>1) throw std::runtime_error("Invalid language");
     auto valid=[](float v,float low,float high){return std::isfinite(v) && v>=low && v<=high;};
-    if (!valid(s.distance,10,500) || !valid(s.height,20,180) || !valid(s.orbit,-180,180) || !valid(s.pitch,-25,25) || !valid(s.lateral,-150,150) || !valid(s.elevation,-60,60) || !valid(s.fov,35,90) || s.columns<2 || s.columns>5)
+    if (!valid(s.distance,10,500) || !valid(s.height,-20,180) || !valid(s.orbit,-180,180) || !valid(s.pitch,-25,25) || !valid(s.lateral,-150,150) || !valid(s.elevation,-60,60) || !valid(s.fov,35,90) || s.columns<2 || s.columns>5)
         throw std::runtime_error("Invalid studio settings");
 }
 StudioSettings ReadStudioSettings(const std::filesystem::path& path) {

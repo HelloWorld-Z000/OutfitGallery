@@ -1,5 +1,6 @@
-OutfitGallery 1.0.2
+OutfitGallery 1.0.3
 Build PASS; CTest 2/2 PASS (PortraitPngCrop, PresetPersistence)
-1.0.1 drag guides: confirmed in game by user
-1.0.2 camera toolbar: not verified in game; check English/Japanese and smaller resolutions
-DLL SHA256: 1086CCA984B4D3CA6C7E0ED5DCC9CAFC00363AF42311567745CC1EE6471A7443
+Regression coverage: legacy weapon/ammo filtering, application-verification target agreement, accessory scope preservation, negative camera height settings/bank roundtrip and out-of-range rejection.
+1.0.1 drag guides and 1.0.2 English toolbar: confirmed in game by user
+1.0.3 equipment preservation and lower camera range: not verified in game
+DLL SHA256: E4A916588ECD4CDA3ED05E2E2FD3021439FAEC6C2056A432192696BD41EA9D2A

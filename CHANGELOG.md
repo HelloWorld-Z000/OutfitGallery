@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.3 — Preserve weapons when changing outfits
+
+- Capture and apply armor/clothing only in every mode, leaving weapons and ammunition equipped. Legacy weapon/ammo entries remain readable but are ignored during application and verification, including missing weapon mods.
+- Extend the camera vertical-position minimum from 20 to -20 for footwear close-ups, including mouse controls and persisted camera settings.
+
 ## 1.0.2 — Compact camera toolbar
 
 - Shorten the English registration label to Save headgear and replace the camera preset heading with a font-independent line icon. Hover over the icon for the localized Camera presets tooltip. Preserve wrapping when the available width is too small.

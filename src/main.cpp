@@ -15,7 +15,7 @@
 
 using namespace REL::literals;
 SKSEPluginInfo(
-    .Version = "1.0.2.0"_v,
+    .Version = "1.0.3.0"_v,
     .Name = "OutfitGallery",
     .Author = "Outfit Gallery contributors",
     .RuntimeCompatibility = { "1.5.97.0"_v, "1.6.353.0"_v, "1.6.640.0"_v, "1.6.1130.0"_v, "1.6.1170.0"_v }
@@ -283,7 +283,7 @@ void Tick() {
         try {
             Preset p; bool add;
             { std::scoped_lock lock(presetsMutex); p = requestedPreset; add = requestedAddMissing; }
-            SetStatus(ApplyEquipment(p,add)); verificationTarget=p; verificationDue=GetTickCount64()+750; verificationTicks=1;
+            SetStatus(ApplyEquipment(p,add)); verificationTarget=ClothingPreset(p); verificationDue=GetTickCount64()+750; verificationTicks=1;
             VerifyEquipment(true);
         } catch (const std::exception& e) { SetStatus(e.what()); }
     }
@@ -355,7 +355,7 @@ void SaveCameraSlot() {
     catch(const std::exception& e){SetStatus(e.what());}
 }
 void RenderCameraSettings() {
-    Slider("Distance",distance,10,400); Slider("Horizontal position",lateral,-150,150); Slider("Vertical position",height,20,180);
+    Slider("Distance",distance,10,400); Slider("Horizontal position",lateral,-150,150); Slider("Vertical position",height,-20,180);
     Slider("Orbit",orbit,-180,180); Slider("Look up / down",elevation,-60,60); Slider("Field of view",fov,35,90);
     if(UI::CollapsingHeader(Label("Fine angle adjustment"))) Slider("Pitch",pitch,-25,25);
     UI::TextUnformatted(Tr("Camera and display settings save automatically."));
@@ -441,7 +441,7 @@ void __stdcall RenderStudio() {
                 command = 3;
             }
         }
-        if(UI::IsItemHovered()) UI::SetTooltip("%s\n%s",Tr("Register all worn equipment. Applying replaces the full outfit."),CaptureHint(0).c_str());
+        if(UI::IsItemHovered()) UI::SetTooltip("%s\n%s",Tr("Register worn armor and clothing. Applying keeps weapons and ammunition."),CaptureHint(0).c_str());
         UI::EndDisabled();
         UI::SameLine();
         UI::BeginDisabled(saveBusy);
@@ -469,7 +469,7 @@ void __stdcall RenderStudio() {
         UI::SetNextWindowSize({screen.x*.40f,screen.y*.60f},UI::ImGuiCond_FirstUseEver);
         if(UI::Begin(Label("Help"),&helpOpen,UI::ImGuiWindowFlags_NoCollapse)) {
             UI::TextWrapped(Tr("1. Wear the items to register, then use a registration button or its assigned key."));
-            UI::TextWrapped(Tr("Outfit: register all worn equipment."));
+            UI::TextWrapped(Tr("Outfit: register worn armor and clothing; weapons and ammunition are excluded."));
             UI::Text("%s",CaptureHint(0).c_str());
             UI::TextWrapped(Tr("Head: register head equipment only."));
             UI::Text("%s",CaptureHint(1).c_str());
@@ -503,7 +503,7 @@ void __stdcall RenderStudio() {
             bool changed=false;
             if(UI::IsItemActive() && UI::IsMouseDragging(0) && !UI::IsMouseDown(1)) {
                 lateral=std::clamp(lateral.load()+io->MouseDelta.x*units,-150.f,150.f);
-                height=std::clamp(height.load()+io->MouseDelta.y*units,20.f,180.f);
+                height=std::clamp(height.load()+io->MouseDelta.y*units,-20.f,180.f);
                 changed=io->MouseDelta.x!=0 || io->MouseDelta.y!=0;
             }
             if(UI::IsItemActive() && UI::IsMouseDragging(1) && !UI::IsMouseDown(0)) {
@@ -528,7 +528,7 @@ void __stdcall RenderStudio() {
 
 void __stdcall RenderSettings() {
     RenderHotkeys();
-    UI::TextUnformatted(Tr("Outfit Gallery 1.0.2 - photo presets"));
+    UI::TextUnformatted(Tr("Outfit Gallery 1.0.3 - photo presets"));
     UI::TextWrapped(Tr("Close this menu and press the configured hotkey (default F8) while standing in a safe open area."));
     UI::TextUnformatted(Tr("F9 in the studio saves a photo and equipment. Click a preset photo to apply."));
     UI::Text(Tr("SmoothCam API: %s / TDM API: %s"), smooth ? "ready" : "not available", tdm ? "ready" : "not available");
@@ -660,7 +660,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
     Gallery::saveHotkey = GetPrivateProfileIntW(L"Input", L"SaveHotkey", 67, ini.c_str());
     Gallery::captureKeys[0]=Gallery::saveHotkey;
     Gallery::gamepadHotkey = GetPrivateProfileIntW(L"Input", L"GamepadHotkey", 32, ini.c_str());
-    SKSE::log::info("OutfitGallery 1.0.2 release; runtime {}; key={}", runtime.string(), Gallery::hotkey.load());
+    SKSE::log::info("OutfitGallery 1.0.3 release; runtime {}; key={}", runtime.string(), Gallery::hotkey.load());
     return SKSE::GetMessagingInterface()->RegisterListener(Gallery::Message);
 }
 
