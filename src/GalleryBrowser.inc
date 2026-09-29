@@ -182,6 +182,7 @@ void RenderBrowser(bool& addMissing) {
                 UI::EndPopup();
             }
         }
+        UI::PushStyleColor(UI::ImGuiCol_DragDropTarget,{1.f,.91f,.44f,1.f});
         if(!c.id.empty() && (!c.id.starts_with("#") || c.id=="#trash") && libraryWritable && !saveBusy && UI::BeginDragDropTarget()) {
             if(const auto* payload=UI::AcceptDragDropPayload("OUTFIT_PHOTO")) {
                 if(payload->Data && payload->DataSize>1 && payload->DataSize<512 && static_cast<const char*>(payload->Data)[payload->DataSize-1]=='\0') {
@@ -193,6 +194,7 @@ void RenderBrowser(bool& addMissing) {
             }
             UI::EndDragDropTarget();
         }
+        UI::PopStyleColor();
         if(!c.id.empty() && !c.id.starts_with("#") && UI::IsItemClicked(1)) {
             editCategory=c.id; newCategory=false; strcpy_s(tabName,c.name.c_str()); openTab=true;
         }
@@ -342,18 +344,31 @@ void RenderBrowser(bool& addMissing) {
         if(UI::IsItemClicked(1)) {contextPhoto=p.photo; strcpy_s(editName,p.name.c_str()); openEdit=true; selected=p.photo;}
         // Gamepad A is handled once above; avoid native-nav activation applying another card.
         if(clicked && !UI::GetDragDropPayload() && !PadPressed(UI::ImGuiKey_GamepadFaceDown,false)) {selected=p.photo; tabsFocused=false; columnsFocused=false; queueApply(p);}
+        UI::PushStyleColor(UI::ImGuiCol_PopupBg,{.07f,.07f,.07f,1.f});
         if(libraryWritable && UI::BeginDragDropSource()) {
             UI::SetDragDropPayload("OUTFIT_PHOTO",p.photo.c_str(),p.photo.size()+1);
             UI::TextUnformatted(p.name.c_str());
             if(texture) UI::Image(texture,{w*.5f,h*.5f});
             UI::EndDragDropSource();
         }
+        UI::PopStyleColor();
         if(libraryWritable && UI::BeginDragDropTarget()) {
-            if(const auto* payload=UI::AcceptDragDropPayload("OUTFIT_PHOTO")) {
+            if(const auto* payload=UI::AcceptDragDropPayload("OUTFIT_PHOTO",UI::ImGuiDragDropFlags_AcceptBeforeDelivery|UI::ImGuiDragDropFlags_AcceptNoDrawDefaultRect)) {
                 if(payload->Data && payload->DataSize>1 && payload->DataSize<512 && static_cast<const char*>(payload->Data)[payload->DataSize-1]=='\0') {
                     const std::string source(static_cast<const char*>(payload->Data));
-                    auto next=library; next.order=fullOrder;
-                    if(MovePhoto(next.order,source,p.photo,UI::GetIO()->MousePos.x>(photoMin.x+photoMax.x)*.5f) && CommitLibrary(std::move(next))) selected=source;
+                    const bool after=UI::GetIO()->MousePos.x>(photoMin.x+photoMax.x)*.5f;
+                    if(source!=p.photo && payload->Preview) {
+                        auto* draw=UI::GetWindowDrawList();
+                        UI::ImDrawListManager::AddRect(draw,{photoMin.x+3,photoMin.y+3},{photoMax.x-3,photoMax.y-3},0xFF171717,0,0,7.f);
+                        UI::ImDrawListManager::AddRect(draw,{photoMin.x+3,photoMin.y+3},{photoMax.x-3,photoMax.y-3},0xFF70E8FF,0,0,3.f);
+                        const float x=after?photoMax.x-5:photoMin.x+5;
+                        UI::ImDrawListManager::AddLine(draw,{x,photoMin.y+5},{x,photoMax.y-5},0xFF171717,10.f);
+                        UI::ImDrawListManager::AddLine(draw,{x,photoMin.y+5},{x,photoMax.y-5},0xFF70E8FF,6.f);
+                    }
+                    if(payload->Delivery) {
+                        auto next=library; next.order=fullOrder;
+                        if(MovePhoto(next.order,source,p.photo,after) && CommitLibrary(std::move(next))) selected=source;
+                    }
                 }
             }
             UI::EndDragDropTarget();

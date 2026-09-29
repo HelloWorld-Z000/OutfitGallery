@@ -1,6 +1,6 @@
 # Outfit Gallery — Visual Outfit Manager
 
-**Version 1.0.0** · English / 日本語 · Native SKSE plugin
+**Version 1.0.1** · English / 日本語 · Native SKSE plugin
 
 Build a visual wardrobe: photograph your equipped items, browse your collection, and change equipment by selecting a picture. Outfit changes appear while the gallery is open.
 
@@ -24,7 +24,7 @@ Install the SKSE build and Address Library matching your Skyrim executable, plus
 | 1.6.353, 1.6.640, 1.6.1130 | Accepted by the DLL; not verified in game |
 | GOG / VR / other runtimes | Not enabled |
 
-The 1.0.0 build has automated build/test verification. The final in-game appearance was confirmed on 0.14.9; 1.0.0 changes release metadata and documentation only. The table does not imply every feature was tested on every runtime.
+The 1.0.1 build has automated build/test verification. The 0.14.9 appearance and 1.0.0 baseline were user-tested; the revised drag guides in 1.0.1 still need in-game verification. The table does not imply every feature was tested on every runtime.
 
 SmoothCam and True Directional Movement are optional; their public APIs are used when available. No outfits, wigs, accessories, fonts or other mods are included. Install the original item mods referenced by your presets.
 
