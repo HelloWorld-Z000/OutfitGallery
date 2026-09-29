@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.4 — Replace conflicting armor in partial modes
+
+- Head/accessory presets now replace overlapping worn armor instead of rejecting pieces that also use other slots. A conflicting multi-slot wig or garment is unequipped as a whole. Unrelated armor, weapons, and ammunition remain outside the replacement scope.
+- Preserve incoming-preset slot validation and ownership checks. Update bilingual help to explain replacement behavior.
+
 ## 1.0.3 — Preserve weapons when changing outfits
 
 - Capture and apply armor/clothing only in every mode, leaving weapons and ammunition equipped. Legacy weapon/ammo entries remain readable but are ignored during application and verification, including missing weapon mods.

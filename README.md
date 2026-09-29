@@ -1,6 +1,6 @@
 # Outfit Gallery — Visual Outfit Manager
 
-**Version 1.0.3** · English / 日本語 · Native SKSE plugin
+**Version 1.0.4** · English / 日本語 · Native SKSE plugin
 
 Build a visual wardrobe: photograph your equipped items, browse your collection, and change equipment by selecting a picture. Outfit changes appear while the gallery is open.
 
@@ -24,7 +24,7 @@ Install the SKSE build and Address Library matching your Skyrim executable, plus
 | 1.6.353, 1.6.640, 1.6.1130 | Accepted by the DLL; not verified in game |
 | GOG / VR / other runtimes | Not enabled |
 
-The 1.0.1 drag guides and 1.0.2 English toolbar were confirmed in game by the user. Version 1.0.3 preserves weapons/ammunition and extends the lower camera range; these changes still need in-game verification. The table does not imply every feature was tested on every runtime.
+The 1.0.1 drag guides and 1.0.2 English toolbar were confirmed in game by the user. Version 1.0.3 weapon preservation and footwear framing were also confirmed by the user. Version 1.0.4 replaces conflicting worn armor during partial changes; this change still needs in-game verification. The table does not imply every feature was tested on every runtime.
 
 SmoothCam and True Directional Movement are optional; their public APIs are used when available. No outfits, wigs, accessories, fonts or other mods are included. Install the original item mods referenced by your presets.
 
@@ -86,3 +86,5 @@ Enable **Add missing base items** to restore items you do not own, including on 
 ## Source and credits
 
 See [BUILD.md](BUILD.md) for rebuilding, [THIRD_PARTY.md](THIRD_PARTY.md) for dependency provenance, and [LICENSE](LICENSE) / `LICENSES/` for licenses. Project source is provided under GPL-3.0 as documented in THIRD_PARTY.md. The implementation was authored with substantial AI assistance. Third-party runtime dependencies remain separately installed.
+
+Partial changes prioritize the selected preset. Any worn armor sharing its slots is unequipped as a whole, including multi-slot wigs or clothing. Unrelated armor is kept. This behavior requires in-game verification for 1.0.4.

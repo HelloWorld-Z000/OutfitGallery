@@ -29,8 +29,8 @@ int main() {
         if(!CollectionFits(2,"#accessories",true) || !CollectionFits(2,"#trash",true) || CollectionFits(2,"#accessories",false)) throw std::runtime_error("Accessory isolation failed");
         auto invalidAccessories=accessories; invalidAccessories.slotMask=0; rejects(invalidAccessories);
         invalidAccessories=accessories; invalidAccessories.items[0].kind="weapon"; rejects(invalidAccessories);
-        // A ring overlaps the target; body armor sharing its slot must block
-        // the operation, whereas ordinary body armor stays outside the scope.
+        // A ring overlaps the target; body armor sharing its slot is replaced.
+        // Incoming multi-slot armor must still fit; unrelated armor is outside scope.
         if(!SlotFits(0x40,0x60) || !SlotIntersects(0x44,0x60) || SlotFits(0x44,0x60) || SlotIntersects(4,0x60)) throw std::runtime_error("Accessory conflict protection failed");
         if(CollectionFits(0x1803,"") || CollectionFits(2,"favorites") || CollectionFits(0,"#head") || CollectionFits(4,"#head") || !CollectionFits(2,"#head") || !CollectionFits(4,"#legacy") || !CollectionFits(2,"#trash")) throw std::runtime_error("Independent head collection leaked");
         Preset part{"Head","head.png",{{"Hair.esp",0x123,"Hair","armor",""}},0x1803};

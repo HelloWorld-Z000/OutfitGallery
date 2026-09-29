@@ -15,7 +15,7 @@
 
 using namespace REL::literals;
 SKSEPluginInfo(
-    .Version = "1.0.3.0"_v,
+    .Version = "1.0.4.0"_v,
     .Name = "OutfitGallery",
     .Author = "Outfit Gallery contributors",
     .RuntimeCompatibility = { "1.5.97.0"_v, "1.6.353.0"_v, "1.6.640.0"_v, "1.6.1130.0"_v, "1.6.1170.0"_v }
@@ -482,7 +482,7 @@ void __stdcall RenderStudio() {
             UI::TextWrapped(Tr("Ring icon: add the pictured items, keeping your clothes; replace items in matching slots."));
             UI::Spacing();
             UI::TextWrapped(Tr("D-pad: select. A: apply. LB/RB: tabs. LT: head. RT: accessories. R3: photo menu. B: close."));
-            UI::TextWrapped(Tr("Enable Add missing base items to restore unowned items. Items spanning unrelated slots may block a partial change."));
+            UI::TextWrapped(Tr("Enable Add missing base items to restore unowned items. Conflicting worn armor is removed as a whole, including wigs or clothing using multiple slots."));
             UI::TextWrapped(Tr("Drag inside the camera frame to move the subject. Use the wheel to change distance."));
             UI::TextWrapped(Tr("Right-drag horizontally to orbit; vertically to look up or down."));
             if(UI::Button(Label("Close"))) helpOpen=false;
@@ -528,7 +528,7 @@ void __stdcall RenderStudio() {
 
 void __stdcall RenderSettings() {
     RenderHotkeys();
-    UI::TextUnformatted(Tr("Outfit Gallery 1.0.3 - photo presets"));
+    UI::TextUnformatted(Tr("Outfit Gallery 1.0.4 - photo presets"));
     UI::TextWrapped(Tr("Close this menu and press the configured hotkey (default F8) while standing in a safe open area."));
     UI::TextUnformatted(Tr("F9 in the studio saves a photo and equipment. Click a preset photo to apply."));
     UI::Text(Tr("SmoothCam API: %s / TDM API: %s"), smooth ? "ready" : "not available", tdm ? "ready" : "not available");
@@ -660,7 +660,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
     Gallery::saveHotkey = GetPrivateProfileIntW(L"Input", L"SaveHotkey", 67, ini.c_str());
     Gallery::captureKeys[0]=Gallery::saveHotkey;
     Gallery::gamepadHotkey = GetPrivateProfileIntW(L"Input", L"GamepadHotkey", 32, ini.c_str());
-    SKSE::log::info("OutfitGallery 1.0.3 release; runtime {}; key={}", runtime.string(), Gallery::hotkey.load());
+    SKSE::log::info("OutfitGallery 1.0.4 release; runtime {}; key={}", runtime.string(), Gallery::hotkey.load());
     return SKSE::GetMessagingInterface()->RegisterListener(Gallery::Message);
 }
 

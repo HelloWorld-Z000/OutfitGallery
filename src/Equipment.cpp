@@ -83,12 +83,9 @@ std::string ApplyEquipment(const Preset& source, bool addMissing) {
     }
     if(p.accessories && (!p.slotMask || resolvedMask!=p.slotMask)) throw std::runtime_error("Accessory slots changed. Register this set again.");
     auto inventory = player->GetInventory();
-    // Validate all conflicting worn armor before any inventory mutation.
-    if(p.slotMask) for(const auto& [obj,data]:inventory) {
-        if(!obj || !data.second || !data.second->IsWorn()) continue;
-        const auto* armor=obj->As<RE::TESObjectARMO>();
-        if(armor && SlotIntersects(armor->GetSlotMask().underlying(),p.slotMask) && !SlotFits(armor->GetSlotMask().underlying(),p.slotMask)) throw std::runtime_error("Item uses unselected slots: "+std::string(obj->GetName()));
-    }
+    // The selected preset wins slot conflicts. An overlapping worn armor piece
+    // is removed as a whole, even when it also occupies slots outside this scope.
+    // Incoming items still must fit the saved scope (validated above).
     for (const auto& [obj, count] : needed) {
         const auto found = inventory.find(obj);
         const auto owned = found == inventory.end() ? 0 : std::max(0,found->second.first);

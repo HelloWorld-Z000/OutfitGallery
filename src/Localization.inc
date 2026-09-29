@@ -22,7 +22,7 @@ const std::map<std::string,std::string> japanese{
  {"Wear only the accessories to register. Applying adds or replaces their slots.","小物：追加したい装備だけを身につけて登録。選択すると対象の装備を追加し、同じスロットに装備があれば交換します。"},
  {"2. Select a photo below. Text tabs: full outfits. Person icon: head equipment. Ring icon: accessories.","② 下の写真から希望の装備を選びます。文字のタブは装備一式（分類可能）、人型は頭装備、指輪は小物です。"},
  {"D-pad: select. A: apply. LB/RB: tabs. LT: head. RT: accessories. R3: photo menu. B: close.","十字キー：選択／A：着替え／LB・RB：タブ／L2：頭装備／R2：小物／右スティック押し込み：写真メニュー／B：閉じる"},
- {"Enable Add missing base items to restore unowned items. Items spanning unrelated slots may block a partial change.","未所持の装備は「不足している装備を追加」で復元できます。対象外のスロットも使う装備と競合する場合は、部分的な着替えを停止します。"},
+ {"Enable Add missing base items to restore unowned items. Conflicting worn armor is removed as a whole, including wigs or clothing using multiple slots.","未所持の装備は「不足している装備を追加」で復元できます。スロットが重なる装備は、複数スロットを使うウィッグや服も含め、装備ごと外して交換します。"},
  {"Save accessories","小物を登録"},{"Accessories","小物"},{"[Accessories]","［小物］"},
  {"Wear only the accessories to register. Save photo: L3.","登録したい小物だけを身につけて撮影：左スティック押し込み（L3）"},
  {"No equipped accessories to save.","保存できる小物を装備していません。"},
