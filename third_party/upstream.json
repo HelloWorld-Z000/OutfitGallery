@@ -1,0 +1,20 @@
+[
+  {
+    "Repository": "mwilsnd/SkyrimSE-SmoothCam",
+    "Commit": "66f3960ec4de2b28af5e863c794a3924e6a2dfdd",
+    "File": "SmoothCamAPI.h",
+    "SHA256": "9F235A668D12315F788AB6197375F44C37E8C5B6A33CCAF30481C49EBB5B4E0F"
+  },
+  {
+    "Repository": "ersh1/TrueDirectionalMovement",
+    "Commit": "57b913ae17fed857c9e281799174898cd66a3e82",
+    "File": "TrueDirectionalMovementAPI.h",
+    "SHA256": "9BB0B29613E437BB1364D362D1CD8D1BF10AFE82BAC92DCDDE299AC4BBBA2F55"
+  },
+  {
+    "Repository": "QTR-Modding/SKSE-Menu-Framework-3-API",
+    "Commit": "1dcb70179076aae4ab626f43c5baab2735ca5877",
+    "File": "SKSEMenuFramework.h",
+    "SHA256": "48416E8220CA777E2FFFC2EF2BAF21F699AB2E6C409D437F44EEC5E311C3524C"
+  }
+]

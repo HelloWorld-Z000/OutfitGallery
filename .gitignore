@@ -1,0 +1,9 @@
+/build*/
+/.vs/
+*.user
+*.suo
+*.log
+*.dll
+*.pdb
+*.obj
+/Data/

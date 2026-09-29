@@ -1,0 +1,6 @@
+OutfitGallery 1.0.0
+Build: PASS (MSVC 19.44, CommonLib v4.39.3)
+CTest: 2/2 PASS (PortraitPngCrop, PresetPersistence)
+Integration header hashes: PASS
+In-game: user confirmed 0.14.9; 1.0.0 changes metadata/documentation only and has not separately been launched in game.
+DLL SHA256: 66175AE6E03A0D1B55CAA3114A982F14891CFA338D0FDD940770FB6CB14CA481
