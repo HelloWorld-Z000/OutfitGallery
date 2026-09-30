@@ -1,6 +1,6 @@
 # Outfit Gallery — Visual Outfit Manager
 
-**Version 1.0.6** · English / 日本語 · Native SKSE plugin
+**Version 1.0.7** · English / 日本語 · Native SKSE plugin
 
 Build a visual wardrobe: photograph equipped outfits, browse your collection, and change clothes by selecting a picture. Includes an optional independent preview window and experimental follower support. Weapons and ammunition are kept.
 
@@ -59,14 +59,16 @@ The author confirmed improved preview and saved photos with Community Shaders vi
 
 Install the SKSE build and Address Library matching your Skyrim executable, plus **SKSE Menu Framework 3** and its own dependencies. This plugin needs the framework's event-priority and input-event API; older incompatible framework builds will not open the gallery. Dependencies are not bundled.
 
-| Steam Skyrim runtime | Status |
+| Skyrim runtime | Status |
 | --- | --- |
 | 1.5.97 | Startup and equipment switching confirmed by the tester during development |
 | 1.6.1170 | Main development test environment; gallery, camera and equipment workflows user-tested |
 | 1.6.353, 1.6.640, 1.6.1130 | Accepted by the DLL; not verified in game |
-| GOG / VR / other runtimes | Not enabled |
+| Steam 1.7.104 | User-tested with the compatibility build; requires SKSE 2.3.1 |
+| GOG 1.6.1179 | Enabled; requires GOG SKSE 2.2.6; not verified in game |
+| VR / other runtimes | Not enabled |
 
-The 1.0.1 drag guides and 1.0.2 English toolbar were confirmed in game by the user. Version 1.0.3 weapon preservation and footwear framing were also confirmed by the user. Version 1.0.4 replaces conflicting worn armor during partial changes; this was confirmed in game by the user. The table does not imply every feature was tested on every runtime.
+The 1.0.1 drag guides and 1.0.2 English toolbar were confirmed in game by the user. Version 1.0.3 weapon preservation and footwear framing were also confirmed by the user. Version 1.0.4 replaces conflicting worn armor during partial changes; this was confirmed in game by the user. The table does not imply every feature was tested on every runtime. Version 1.0.7 packages the user-tested compatibility build; older supported runtimes were not all retested after the CommonLib update. For Steam 1.7.104 use Address Library All in One v13 (1.7.104.0) and a 1.7-compatible SKSE Menu Framework 3 build.
 
 SmoothCam and True Directional Movement are optional; their public APIs are used when available. No outfits, wigs, accessories, fonts or other mods are included. Install the original item mods referenced by your presets.
 
@@ -131,3 +133,6 @@ Enable **Add missing base items** to restore items you do not own, including on 
 See [BUILD.md](BUILD.md) for rebuilding, [THIRD_PARTY.md](THIRD_PARTY.md) for dependency provenance, and [LICENSE](LICENSE) / `LICENSES/` for licenses. Project source is provided under GPL-3.0 as documented in THIRD_PARTY.md. The implementation was authored with substantial AI assistance. Third-party runtime dependencies remain separately installed.
 
 Partial changes prioritize the selected preset. Any worn armor sharing its slots is unequipped as a whole, including multi-slot wigs or clothing. Unrelated armor is kept. This behavior was confirmed in game by the user.
+
+## Updating to 1.0.7
+This is the complete main package; no compatibility patch is required. Disable runtime/transmog trial overrides so this DLL wins. Preserve your photo/preset/settings folder and customized INI when updating. No data or co-save format migration is introduced. The experimental transmog feature is not included.

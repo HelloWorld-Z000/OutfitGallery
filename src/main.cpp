@@ -17,10 +17,10 @@
 
 using namespace REL::literals;
 SKSEPluginInfo(
-    .Version = "1.0.6.0"_v,
+    .Version = "1.0.7.0"_v,
     .Name = "OutfitGallery",
     .Author = "Outfit Gallery contributors",
-    .RuntimeCompatibility = { "1.5.97.0"_v, "1.6.353.0"_v, "1.6.640.0"_v, "1.6.1130.0"_v, "1.6.1170.0"_v }
+    .RuntimeCompatibility = { "1.5.97.0"_v, "1.6.353.0"_v, "1.6.640.0"_v, "1.6.1130.0"_v, "1.6.1170.0"_v, "1.6.1179.0"_v, "1.7.104.0"_v }
 )
 
 namespace Gallery {
@@ -773,10 +773,10 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
     const auto runtime=skse->RuntimeVersion();
     const auto supported=SKSEPlugin_Version.GetRuntimeCompatibility().GetCompatibleRuntimeVersions();
     if(std::none_of(supported.begin(),supported.end(),[&](const auto& version){return static_cast<REL::Version>(version)==runtime;})) {
-        SKSE::log::error("Unsupported Skyrim runtime {}. Supported targets: 1.5.97, 1.6.353, 1.6.640, 1.6.1130, 1.6.1170. VR/GOG are not enabled.",runtime.string());
+        SKSE::log::error("Unsupported Skyrim runtime {}. Supported targets: 1.5.97, 1.6.353, 1.6.640, 1.6.1130, 1.6.1170, GOG 1.6.1179, Steam 1.7.104. VR is not enabled.",runtime.string());
         return false;
     }
-    SKSE::log::info("Runtime {} accepted; release runtime target; development testing reported on 1.5.97 and 1.6.1170.",runtime.string());
+    SKSE::log::info("Runtime {} accepted; 1.0.7 runtime target; Steam 1.7.104 user-tested; GOG 1.6.1179 untested.",runtime.string());
     SKSE::Init(skse, false);
     Gallery::InitializeManagedItems();
     const auto ini = std::filesystem::absolute("Data/SKSE/Plugins/OutfitGallery.ini");
@@ -784,7 +784,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
     Gallery::saveHotkey = GetPrivateProfileIntW(L"Input", L"SaveHotkey", 67, ini.c_str());
     Gallery::captureKeys[0]=Gallery::saveHotkey;
     Gallery::gamepadHotkey = GetPrivateProfileIntW(L"Input", L"GamepadHotkey", 32, ini.c_str());
-    SKSE::log::info("OutfitGallery 1.0.6; runtime {}; key={}", runtime.string(), Gallery::hotkey.load());
+    SKSE::log::info("OutfitGallery 1.0.7 (CommonLib 10.1.0); runtime {}; key={}", runtime.string(), Gallery::hotkey.load());
     return SKSE::GetMessagingInterface()->RegisterListener(Gallery::Message);
 }
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.7 - Steam 1.7.104 and GOG runtime compatibility
+
+- Add Steam 1.7.104 (SKSE 2.3.1), user-tested with the compatibility build.
+- Enable GOG 1.6.1179 (GOG SKSE 2.2.6); not yet verified in game.
+- Update CommonLibSSE-NG from 4.39.3 to 10.1.0 for current runtime detection and Address Library support.
+- Complete main package with INI. Retain the 1.0.6 gallery, independent preview and experimental follower features; no transmog or saved-data format changes.
+
+
 ## 1.0.6 — Follower support (experimental)
 
 - Improve independent preview clarity by aligning the image to physical pixels and avoiding enlargement beyond native resolution. Smaller windows still scale to fit; larger windows may show margins. Full-body and close-up comparisons checked by the author in their environment.
