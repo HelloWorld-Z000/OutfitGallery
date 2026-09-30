@@ -1,57 +1,55 @@
 #include "ManagedItems.h"
+#include "ManagedLedger.h"
+#include "Presets.h"
+#include "FollowerOutfits.h"
 #include <mutex>
 #include <set>
 #include <map>
 
 namespace Gallery {
 namespace {
-struct Identity {
-    RE::FormID form{}, owner{};
-    std::uint16_t id{};
-    auto operator<=>(const Identity&) const = default;
-};
+using Identity=ManagedIdentity;
 std::mutex ledgerMutex;
-std::set<Identity> ledger;
-std::map<RE::FormID,int> newItems;
+ManagedLedger ledger;
 constexpr std::uint32_t namespaceID=0x4F474D49; // OGMI
 constexpr std::uint32_t itemRecord=0x4954454D; // ITEM
 
-void Forget(const Identity& key) {std::scoped_lock lock(ledgerMutex); ledger.erase(key);}
-void Revert(SKSE::SerializationInterface*) {std::scoped_lock lock(ledgerMutex); ledger.clear(); newItems.clear();}
+void Forget(const Identity& key) {std::scoped_lock lock(ledgerMutex); ledger.items.erase(key);}
+void Revert(SKSE::SerializationInterface*) {
+    {std::scoped_lock lock(ledgerMutex); ledger.Clear();}
+    ClearFollowerOutfits();
+}
 void Save(SKSE::SerializationInterface* s) {
+    SaveFollowerOutfits(s);
     std::set<Identity> copy;
-    {std::scoped_lock lock(ledgerMutex); copy=ledger;}
+    {std::scoped_lock lock(ledgerMutex); copy=ledger.items;}
     for(const auto& k:copy) {
-        if(!s->OpenRecord(itemRecord,1) || !s->WriteRecordData(k.form) || !s->WriteRecordData(k.owner) || !s->WriteRecordData(k.id)) {
+        if(!s->OpenRecord(itemRecord,k.owner==0x14 ? 1 : 2) || !s->WriteRecordData(k.form) || !s->WriteRecordData(k.owner) || !s->WriteRecordData(k.id)) {
             SKSE::log::error("Managed item ledger could not be saved"); return;
         }
     }
 }
 void Load(SKSE::SerializationInterface* s) {
+    ClearFollowerOutfits();
     std::set<Identity> next;
     std::uint32_t type{},version{},length{};
     while(s->GetNextRecordInfo(type,version,length)) {
-        if(type!=itemRecord || version!=1 || length!=10) continue;
+        if(LoadFollowerOutfit(s,type,version,length)) continue;
+        if(type!=itemRecord || (version!=1 && version!=2) || length!=10) continue;
         Identity old, current;
         if(s->ReadRecordData(old.form)!=4 || s->ReadRecordData(old.owner)!=4 || s->ReadRecordData(old.id)!=2) continue;
         if(!old.id || !s->ResolveFormID(old.form,current.form) || !s->ResolveFormID(old.owner,current.owner)) continue;
         current.id=old.id;
-        if(current.owner==0x14 && next.size()<10000) next.insert(current);
+        if(current.owner && (version==2 || current.owner==0x14) && next.size()<10000) next.insert(current);
     }
-    std::scoped_lock lock(ledgerMutex); ledger=std::move(next);
+    std::scoped_lock lock(ledgerMutex); ledger.Clear(); ledger.items=std::move(next);
 }
 class Transfers final : public RE::BSTEventSink<RE::TESContainerChangedEvent> {
     RE::BSEventNotifyControl ProcessEvent(const RE::TESContainerChangedEvent* e,RE::BSTEventSource<RE::TESContainerChangedEvent>*) override {
-        if(e && (e->oldContainer==0x14 || e->newContainer==0x14)) {
-            // Selling, dropping or storing an item relinquishes ownership. Some
-            // events omit the instance ID: retire all claims for that base form.
-            // No engine calls or inventory mutation while inside the event lock.
+        if(e) {
+            // No engine calls or mutations under the event/ledger lock.
             std::scoped_lock lock(ledgerMutex);
-            newItems.erase(e->baseObj);
-            if(e->oldContainer==0x14 && e->newContainer!=0x14) {
-                const auto erased=std::erase_if(ledger,[&](const auto& k){return k.form==e->baseObj;});
-                if(erased) SKSE::log::info("Released {} gallery claims for transferred item {:08X}",erased,e->baseObj);
-            }
+            ledger.Transfer(e->baseObj,e->oldContainer,e->newContainer);
         }
         return RE::BSEventNotifyControl::kContinue;
     }
@@ -64,25 +62,30 @@ void InitializeManagedItems() {
 void RegisterManagedItemEvents() {
     if(auto* source=RE::ScriptEventSourceHolder::GetSingleton()) source->AddEventSink(&transfers);
 }
-void BeginManagedAddition() {std::scoped_lock lock(ledgerMutex); newItems.clear();}
-void AddManagedItems(RE::PlayerCharacter* player,RE::TESBoundObject* obj,int count,bool previouslyAbsent) {
-    player->AddObjectToContainer(obj,nullptr,count,nullptr);
-    if(previouslyAbsent) {std::scoped_lock lock(ledgerMutex); newItems[obj->GetFormID()]=count;}
+void BeginManagedAddition(RE::Actor* actor) {
+    if(actor) {std::scoped_lock lock(ledgerMutex); ledger.Begin(actor->GetFormID());}
 }
-void TrackNewManagedItems() {
-    auto* player=RE::PlayerCharacter::GetSingleton();
-    auto* changes=player?player->GetInventoryChanges():nullptr;
+void AddManagedItems(RE::Actor* actor,RE::TESBoundObject* obj,int count,bool previouslyAbsent) {
+    if(!actor || !obj || count<=0) return;
+    // Record before AddObject: a synchronous outgoing transfer must be able to
+    // cancel the claim. Incoming add events do not claim existing possessions.
+    if(previouslyAbsent) {std::scoped_lock lock(ledgerMutex); ledger.pending[{actor->GetFormID(),obj->GetFormID()}]=count;}
+    actor->AddObjectToContainer(obj,nullptr,count,nullptr);
+}
+void TrackNewManagedItems(RE::Actor* actor) {
+    if(!actor) return;
+    auto* changes=actor->GetInventoryChanges();
     std::map<RE::FormID,int> added;
-    {std::scoped_lock lock(ledgerMutex); added=std::move(newItems); newItems.clear();}
+    {std::scoped_lock lock(ledgerMutex); added=ledger.TakePending(actor->GetFormID());}
     if(!changes) return;
-    auto inventory=player->GetInventory();
+    auto inventory=actor->GetInventory();
     std::set<std::uint16_t> used;
     for(const auto& [_,data]:inventory) if(data.second && data.second->extraLists) {
         for(auto* extra:*data.second->extraLists) if(extra) if(auto* id=extra->GetByType<RE::ExtraUniqueID>()) {
-            if(id->baseID==player->GetFormID()) used.insert(id->uniqueID);
+            if(id->baseID==actor->GetFormID()) used.insert(id->uniqueID);
         }
     }
-    {std::scoped_lock lock(ledgerMutex); for(const auto& k:ledger) used.insert(k.id);}
+    {std::scoped_lock lock(ledgerMutex); for(const auto& k:ledger.items) if(k.owner==actor->GetFormID()) used.insert(k.id);}
     for(const auto& [obj,data]:inventory) {
         if(!obj) continue;
         const auto found=added.find(obj->GetFormID());
@@ -101,21 +104,21 @@ void TrackNewManagedItems() {
                 if(candidate && !used.contains(candidate)) {id=candidate; break;}
             }
             if(!id) continue;
-            extra->Add(new RE::ExtraUniqueID(player->GetFormID(),id));
+            extra->Add(new RE::ExtraUniqueID(actor->GetFormID(),id));
             used.insert(id);
-            {std::scoped_lock lock(ledgerMutex); ledger.insert({obj->GetFormID(),player->GetFormID(),id});}
-            SKSE::log::info("Tracking gallery item {:08X}, instance {}",obj->GetFormID(),id);
+            {std::scoped_lock lock(ledgerMutex); ledger.items.insert({obj->GetFormID(),actor->GetFormID(),id});}
+            SKSE::log::info("Tracking gallery item {:08X}, instance {}, actor {:08X}",obj->GetFormID(),id,actor->GetFormID());
         }
     }
 }
-void ReclaimManagedItems() {
-    auto* player=RE::PlayerCharacter::GetSingleton();
-    if(!player) return;
+void ReclaimManagedItems(RE::Actor* actor) {
+    if(!actor || !actor->Get3D() || actor->IsDead() || actor->IsDisabled()) return;
+    if(actor!=RE::PlayerCharacter::GetSingleton() && (!actor->IsPlayerTeammate() || actor->IsInCombat())) return;
     std::set<Identity> copy;
-    {std::scoped_lock lock(ledgerMutex); copy=ledger;}
+    {std::scoped_lock lock(ledgerMutex); copy=ledger.ForActor(actor->GetFormID());}
     for(const auto& key:copy) {
         // Re-read after each removal: removing an item can invalidate extra lists.
-        auto inventory=player->GetInventory();
+        auto inventory=actor->GetInventory();
         RE::TESBoundObject* object{};
         RE::ExtraDataList* instance{};
         unsigned matches{}; bool protectedItem=false; int beforeCount{};
@@ -126,11 +129,11 @@ void ReclaimManagedItems() {
                 if(uid->baseID==key.owner && uid->uniqueID==key.id) {object=obj; instance=extra; ++matches;}
             }
         }
-        if(matches!=1 || !instance || instance->GetCount()!=1) {
+        if(matches!=1 || !instance || instance->GetCount()!=1 || beforeCount<=0 || !object || !object->As<RE::TESObjectARMO>()) {
             SKSE::log::info("Preserving ambiguous gallery item {:08X}, instance {}, matches={}, count={}",key.form,key.id,matches,instance?instance->GetCount():0);
             Forget(key); continue;
         }
-        // Player customization relinquishes our claim. Never remove tempered,
+        // User customization relinquishes our claim. Never remove tempered,
         // enchanted, renamed, favorited or quest equipment automatically.
         if(protectedItem || instance->HasType<RE::ExtraHealth>() || instance->HasType<RE::ExtraEnchantment>() || instance->HasType<RE::ExtraTextDisplayData>() || instance->HasType<RE::ExtraHotkey>() || instance->HasType<RE::ExtraPoison>()) {
             SKSE::log::info("Preserving customized gallery item {:08X}, instance {}: quest={}, health={}, enchant={}, name={}, favorite={}, poison={}",key.form,key.id,protectedItem,instance->HasType<RE::ExtraHealth>(),instance->HasType<RE::ExtraEnchantment>(),instance->HasType<RE::ExtraTextDisplayData>(),instance->HasType<RE::ExtraHotkey>(),instance->HasType<RE::ExtraPoison>());
@@ -138,11 +141,11 @@ void ReclaimManagedItems() {
         }
         if(instance->HasType<RE::ExtraWorn>() || instance->HasType<RE::ExtraWornLeft>()) continue;
         bool claimed;
-        {std::scoped_lock lock(ledgerMutex); claimed=ledger.erase(key)!=0;}
+        {std::scoped_lock lock(ledgerMutex); claimed=ledger.items.erase(key)!=0;}
         if(!claimed) continue;
         // Explicit instance, count one. Never a base-form-only removal fallback.
-        player->RemoveItem(object,1,RE::ITEM_REMOVE_REASON::kRemove,instance,nullptr);
-        const auto after=player->GetInventory();
+        actor->RemoveItem(object,1,RE::ITEM_REMOVE_REASON::kRemove,instance,nullptr);
+        const auto after=actor->GetInventory();
         const auto found=after.find(object);
         const auto afterCount=found==after.end()?0:found->second.first;
         bool identityRemains=false;
@@ -151,7 +154,7 @@ void ReclaimManagedItems() {
                 if(uid->baseID==key.owner && uid->uniqueID==key.id) identityRemains=true;
             }
         }
-        if(afterCount==beforeCount-1 && !identityRemains) SKSE::log::info("Reclaimed gallery item {:08X}, instance {}, inventory {} -> {} (verified)",key.form,key.id,beforeCount,afterCount);
+        if(afterCount==beforeCount-1 && !identityRemains) SKSE::log::info("Reclaimed gallery item {:08X}, instance {}, actor {:08X}, inventory {} -> {} (verified)",key.form,key.id,key.owner,beforeCount,afterCount);
         else SKSE::log::warn("Gallery removal not confirmed {:08X}, instance {}, inventory {} -> {}, identity remains={}; no base-form fallback",key.form,key.id,beforeCount,afterCount,identityRemains);
     }
 }

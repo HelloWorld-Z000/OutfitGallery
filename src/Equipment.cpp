@@ -23,12 +23,11 @@ Item Encode(RE::TESBoundObject* obj, const std::string& hand) {
     return {std::string(file->GetFilename()),id,obj->GetName() ? obj->GetName() : "",Kind(obj),hand};
 }
 }
-Preset SnapshotEquipment(std::uint32_t slotMask) {
-    auto* player = RE::PlayerCharacter::GetSingleton();
-    if (!player) throw std::runtime_error("Player unavailable");
+Preset SnapshotEquipment(RE::Actor* actor, std::uint32_t slotMask) {
+    if (!actor) throw std::runtime_error("Target unavailable");
     Preset p;
     p.slotMask=slotMask;
-    for (const auto& [obj, data] : player->GetInventory()) {
+    for (const auto& [obj, data] : actor->GetInventory()) {
         const auto& [count, entry] = data;
         if (!obj || count <= 0 || !entry || !entry->IsWorn() || !obj->As<RE::TESObjectARMO>()) continue;
         if(slotMask) {
@@ -41,11 +40,10 @@ Preset SnapshotEquipment(std::uint32_t slotMask) {
     if (p.items.empty()) throw std::runtime_error("No equipped armor or clothing to save");
     return p;
 }
-Preset SnapshotAccessories() {
-    auto* player=RE::PlayerCharacter::GetSingleton();
-    if(!player) throw std::runtime_error("Player unavailable");
+Preset SnapshotAccessories(RE::Actor* actor) {
+    if(!actor) throw std::runtime_error("Target unavailable");
     Preset p; p.accessories=true;
-    for(const auto& [obj,data]:player->GetInventory()) {
+    for(const auto& [obj,data]:actor->GetInventory()) {
         if(!obj || data.first<=0 || !data.second || !data.second->IsWorn()) continue;
         const auto* armor=obj->As<RE::TESObjectARMO>();
         if(!armor) continue;
@@ -56,14 +54,13 @@ Preset SnapshotAccessories() {
     if(p.items.empty()) throw std::runtime_error("No equipped accessories to save.");
     return p;
 }
-std::string ApplyEquipment(const Preset& source, bool addMissing) {
+std::string ApplyEquipment(RE::Actor* actor, const Preset& source, bool addMissing) {
     const auto p=ClothingPreset(source);
     if(p.items.empty()) throw std::runtime_error("No equipped armor or clothing to save");
-    BeginManagedAddition();
-    auto* player = RE::PlayerCharacter::GetSingleton();
+    BeginManagedAddition(actor);
     auto* manager = RE::ActorEquipManager::GetSingleton();
     auto* handler = RE::TESDataHandler::GetSingleton();
-    if (!player || !manager || !handler) throw std::runtime_error("Equipment manager unavailable");
+    if (!actor || !manager || !handler) throw std::runtime_error("Equipment manager unavailable");
     std::vector<std::pair<RE::TESBoundObject*,const RE::BGSEquipSlot*>> resolved;
     std::map<RE::TESBoundObject*,int> needed;
     std::uint32_t resolvedMask=0;
@@ -82,7 +79,7 @@ std::string ApplyEquipment(const Preset& source, bool addMissing) {
         resolved.emplace_back(obj,slot); ++needed[obj];
     }
     if(p.accessories && (!p.slotMask || resolvedMask!=p.slotMask)) throw std::runtime_error("Accessory slots changed. Register this set again.");
-    auto inventory = player->GetInventory();
+    auto inventory = actor->GetInventory();
     // The selected preset wins slot conflicts. An overlapping worn armor piece
     // is removed as a whole, even when it also occupies slots outside this scope.
     // Incoming items still must fit the saved scope (validated above).
@@ -94,7 +91,9 @@ std::string ApplyEquipment(const Preset& source, bool addMissing) {
     for (const auto& [obj, count] : needed) {
         const auto found = inventory.find(obj);
         const auto owned = found == inventory.end() ? 0 : std::max(0,found->second.first);
-        if(owned<count) AddManagedItems(player,obj,count-owned,owned==0);
+        if(owned<count) {
+            AddManagedItems(actor,obj,count-owned,owned==0);
+        }
     }
     // Use each worn instance when unequipping; never destroy inventory items.
     for (const auto& [obj,data] : inventory) {
@@ -108,18 +107,18 @@ std::string ApplyEquipment(const Preset& source, bool addMissing) {
             if (!extra) continue;
             const bool right = extra->HasType<RE::ExtraWorn>();
             const bool left = extra->HasType<RE::ExtraWornLeft>();
-            if (right) manager->UnequipObject(player,obj,extra,1,obj->As<RE::TESObjectWEAP>() ? Slot("right") : nullptr,false,false,false,true);
+            if (right) manager->UnequipObject(actor,obj,extra,1,obj->As<RE::TESObjectWEAP>() ? Slot("right") : nullptr,false,false,false,true);
             // The first unequip may destroy its extra list; do not reuse that
             // pointer if an instance happened to carry both worn markers.
-            if (left) manager->UnequipObject(player,obj,right ? nullptr : extra,1,obj->As<RE::TESObjectWEAP>() ? Slot("left") : nullptr,false,false,false,true);
+            if (left) manager->UnequipObject(actor,obj,right ? nullptr : extra,1,obj->As<RE::TESObjectWEAP>() ? Slot("left") : nullptr,false,false,false,true);
         }
     }
-    for (const auto& [obj,slot] : resolved) manager->EquipObject(player,obj,nullptr,1,slot,false,false,false,true);
-    TrackNewManagedItems();
+    for (const auto& [obj,slot] : resolved) manager->EquipObject(actor,obj,nullptr,1,slot,false,false,false,true);
+    TrackNewManagedItems(actor);
     // The blocking gallery can defer the normal actor model refresh until close.
     // Refresh once after the complete outfit, on the game task thread. CommonLib
     // also dispatches NiNodeUpdateEvent for consumers such as appearance plugins.
-    player->Update3DModel();
-    return "Equip requests sent: " + p.name + ". Check the player preview.";
+    actor->Update3DModel();
+    return "Equip requests sent: " + p.name + ". Check the preview.";
 }
 }

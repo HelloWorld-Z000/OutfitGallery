@@ -11,6 +11,9 @@
 namespace Gallery {
 namespace {
 std::map<std::string,Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>> portraitViews;
+Microsoft::WRL::ComPtr<ID3D11Texture2D> liveTexture;
+Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> liveView;
+float liveAspect=1.f;
 void Check(HRESULT result, const char* operation) {
     if (FAILED(result)) throw std::runtime_error(std::format("{} failed (0x{:08X})", operation, static_cast<unsigned>(result)));
 }
@@ -66,7 +69,57 @@ void* LoadPortraitView(const std::string& path) {
     auto* result=view.Get(); portraitViews.emplace(path,std::move(view)); return result;
 }
 void DisposePortraitView(const std::string& path) {portraitViews.erase(path);}
-std::filesystem::path CapturePortrait() {
+void ResetLivePreview() { liveView.Reset(); liveTexture.Reset(); }
+void* LivePreviewView() { return liveView.Get(); }
+float LivePreviewAspect() { return liveAspect; }
+void UpdateLivePreview() {
+    using Microsoft::WRL::ComPtr;
+    auto* window=RE::BSGraphics::Renderer::GetCurrentRenderWindow();
+    if(!window || !window->swapChain) throw std::runtime_error("Preview swap chain unavailable");
+    auto* swap=reinterpret_cast<IDXGISwapChain*>(window->swapChain);
+    ComPtr<ID3D11Texture2D> frame;
+    Check(swap->GetBuffer(0,IID_PPV_ARGS(frame.GetAddressOf())),"Preview GetBuffer");
+    UpdateLivePreviewTexture(frame.Get());
+}
+void UpdateLivePreviewTexture(ID3D11Texture2D* frame) {
+    using Microsoft::WRL::ComPtr;
+    if(!frame) throw std::runtime_error("No preview texture");
+    D3D11_TEXTURE2D_DESC source{}; frame->GetDesc(&source);
+    if(source.Width<64 || source.Height<64 || source.SampleDesc.Count!=1)
+        throw std::runtime_error("Unsupported preview render size or MSAA");
+    // Match SavePortraitTexture's centered crop, including integer rounding.
+    D3D11_BOX box{UINT(source.Width*.275f),UINT(source.Height*.08f),0,
+        UINT(source.Width*.725f),UINT(source.Height*.92f),1};
+    auto desc=source;
+    desc.Width=box.right-box.left; desc.Height=box.bottom-box.top;
+    // Preserve display-referred values just like the saved PNG preview.
+    if(desc.Format==DXGI_FORMAT_R8G8B8A8_UNORM_SRGB) desc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;
+    if(desc.Format==DXGI_FORMAT_B8G8R8A8_UNORM_SRGB) desc.Format=DXGI_FORMAT_B8G8R8A8_UNORM;
+    if(desc.Format==DXGI_FORMAT_R8G8B8A8_TYPELESS) desc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;
+    if(desc.Format==DXGI_FORMAT_B8G8R8A8_TYPELESS) desc.Format=DXGI_FORMAT_B8G8R8A8_UNORM;
+    if(desc.Format==DXGI_FORMAT_R10G10B10A2_TYPELESS) desc.Format=DXGI_FORMAT_R10G10B10A2_UNORM;
+    if(desc.Format==DXGI_FORMAT_R16G16B16A16_TYPELESS) desc.Format=DXGI_FORMAT_R16G16B16A16_FLOAT;
+    if(desc.Format!=DXGI_FORMAT_R8G8B8A8_UNORM && desc.Format!=DXGI_FORMAT_B8G8R8A8_UNORM &&
+       desc.Format!=DXGI_FORMAT_R10G10B10A2_UNORM && desc.Format!=DXGI_FORMAT_R16G16B16A16_FLOAT &&
+       desc.Format!=DXGI_FORMAT_B8G8R8X8_UNORM)
+        throw std::runtime_error(std::format("Unsupported preview DXGI format {}",unsigned(source.Format)));
+    desc.MipLevels=1; desc.ArraySize=1; desc.Usage=D3D11_USAGE_DEFAULT;
+    desc.BindFlags=D3D11_BIND_SHADER_RESOURCE; desc.CPUAccessFlags=0; desc.MiscFlags=0;
+    ComPtr<ID3D11Device> device; frame->GetDevice(device.GetAddressOf());
+    D3D11_TEXTURE2D_DESC old{};
+    ComPtr<ID3D11Device> oldDevice;
+    if(liveTexture) {liveTexture->GetDesc(&old); liveTexture->GetDevice(oldDevice.GetAddressOf());}
+    if(!liveTexture || old.Width!=desc.Width || old.Height!=desc.Height || old.Format!=desc.Format || device.Get()!=oldDevice.Get()) {
+        SKSE::log::info("Live preview: source {}x{}, DXGI {}, view DXGI {}",source.Width,source.Height,unsigned(source.Format),unsigned(desc.Format));
+        ResetLivePreview();
+        Check(device->CreateTexture2D(&desc,nullptr,liveTexture.GetAddressOf()),"Create live preview");
+        Check(device->CreateShaderResourceView(liveTexture.Get(),nullptr,liveView.GetAddressOf()),"Create live preview view");
+    }
+    ComPtr<ID3D11DeviceContext> context; device->GetImmediateContext(context.GetAddressOf());
+    context->CopySubresourceRegion(liveTexture.Get(),0,0,0,0,frame,0,&box);
+    liveAspect=float(desc.Width)/float(desc.Height);
+}
+std::filesystem::path CapturePortrait(bool centered) {
     using Microsoft::WRL::ComPtr;
     auto* window = RE::BSGraphics::Renderer::GetCurrentRenderWindow();
     if (!window || !window->swapChain) throw std::runtime_error("Game swap chain is unavailable");
@@ -76,9 +129,9 @@ std::filesystem::path CapturePortrait() {
     D3D11_TEXTURE2D_DESC captureDesc{};
     frame->GetDesc(&captureDesc);
     SKSE::log::info("Portrait capture: framework pre-render, {}x{}, DXGI format {}, samples {}",captureDesc.Width,captureDesc.Height,static_cast<unsigned>(captureDesc.Format),captureDesc.SampleDesc.Count);
-    return SavePortraitTexture(frame.Get(), "Data/SKSE/Plugins/OutfitGallery/Captures");
+    return SavePortraitTexture(frame.Get(), "Data/SKSE/Plugins/OutfitGallery/Captures",1024,centered);
 }
-std::filesystem::path SavePortraitTexture(ID3D11Texture2D* frame, const std::filesystem::path& folder, unsigned maxWidth) {
+std::filesystem::path SavePortraitTexture(ID3D11Texture2D* frame, const std::filesystem::path& folder, unsigned maxWidth, bool centered) {
     using Microsoft::WRL::ComPtr;
     if (!frame) throw std::runtime_error("No texture to capture");
     if(!maxWidth) throw std::runtime_error("Invalid portrait width");
@@ -86,8 +139,8 @@ std::filesystem::path SavePortraitTexture(ID3D11Texture2D* frame, const std::fil
     frame->GetDesc(&desc);
     if (desc.Width < 64 || desc.Height < 64 || desc.SampleDesc.Count != 1) throw std::runtime_error("Unsupported render size or MSAA backbuffer");
     // Same normalized rectangle as the on-screen portrait guide.
-    D3D11_BOX box{ static_cast<UINT>(desc.Width * 0.54f), static_cast<UINT>(desc.Height * 0.08f), 0,
-        static_cast<UINT>(desc.Width * 0.99f), static_cast<UINT>(desc.Height * 0.92f), 1 };
+    D3D11_BOX box{ static_cast<UINT>(desc.Width * (centered ? 0.275f : 0.54f)), static_cast<UINT>(desc.Height * 0.08f), 0,
+        static_cast<UINT>(desc.Width * (centered ? 0.725f : 0.99f)), static_cast<UINT>(desc.Height * 0.92f), 1 };
     ComPtr<ID3D11Device> device;
     frame->GetDevice(device.GetAddressOf());
     ComPtr<ID3D11DeviceContext> context;

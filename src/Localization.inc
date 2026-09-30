@@ -1,6 +1,28 @@
 // UI translation only: stable ### IDs keep focus and open menus intact.
 int language=0; // 0 English, 1 Japanese
 const std::map<std::string,std::string> japanese{
+ {"Maintain this follower's outfit","この服装を維持"},
+ {"Restore standard outfit","標準装備に戻す"},
+ {"Disables maintenance and restores standard armor. Given items and weapons are kept.","維持を解除して標準の防具を着せ直します。渡した所持品と武器は残します。"},
+ {"Follower outfit maintenance enabled.","このフォロワーの服装維持を有効にしました。"},
+ {"Follower outfit maintenance disabled.","このフォロワーの服装維持を解除しました。"},
+ {"Follower is not available for outfit maintenance.","フォロワーの状態により服装維持・標準装備の復帰を行えません。"},
+ {"No standard outfit is defined for this follower.","このフォロワーには標準衣装が設定されていません。服装維持は解除しました。"},
+ {"Standard outfit uses leveled items; this feature cannot safely restore it.","標準衣装がレベル別抽選装備を含むため、この機能では安全に復帰できません。服装維持は解除しました。"},
+ {"No armor was found in this follower's standard outfit.","標準衣装に防具が見つかりません。服装維持は解除しました。"},
+ {"Checks every 5 seconds while closed. Missing items or repeated conflicts disable maintenance.","画面を閉じている間、約5秒ごとに確認します。装備の紛失や競合の繰り返しで維持を解除します。"},
+ {"Select follower under crosshair (experimental)","クロスヘアのフォロワーを選択（試験機能）"},
+ {"Follower: %s","対象フォロワー：%s"},
+ {"Target: Player","対象：プレイヤー"},
+ {"Studio closed: target is no longer available.","対象の状態が変化したため、画面を閉じました。"},
+ {"Aim at a humanoid current follower, or look away to select yourself.","同行中の人型フォロワーに照準を合わせてください。自分を選ぶ場合は照準を外してください。"},
+ {"The follower must be alive, loaded, standing and out of combat.","フォロワーが生存し、立っていて戦闘中でない状態で起動してください。"},
+ {"Experimental: Other mods may change the outfit.","試用機能：他のMOD等により服装が変わる場合があります。"},
+ {"Close the gallery, aim at a current humanoid follower and press the opening hotkey. Look away to select yourself. Target is fixed until close.","一度閉じ、同行中の人型フォロワーに照準を合わせて起動してください。照準を外すと自分を選択します。対象は閉じるまで固定されます。"},
+ {"Independent preview","独立プレビュー"},
+ {"Live preview","ライブプレビュー"},
+ {"Reset preview position","プレビュー位置をリセット"},
+ {"Drag the preview title to move it; drag its corner to resize. Photos use the centered view. Effects depend on your graphics setup.","タイトルをドラッグして移動、枠の隅でサイズ変更。中央の映像を写真に保存します。エフェクトの見え方は描画環境に依存します。"},
  {"Opening tab","起動時のタブ"},
  {"Choose the tab shown when opening the gallery. Registration still opens the matching tab.","ツールを開いたときに表示するタブです。登録後は、その種類のタブへ移動します。"},
  {"Capture keys","登録キー設定"},{"Keyboard","キーボード"},{"Gamepad","ゲームパッド"},{"Disable","無効化"},{"Reset capture keys","登録キーを初期値に戻す"},
@@ -95,6 +117,7 @@ std::string CategoryTitle(const Category& c) {
 std::string StatusText(const std::string& text) {
     if(language!=1) return text;
     if(japanese.contains(text)) return japanese.at(text);
+    if(text.starts_with("Cannot open studio: ")) return std::string("画面を開けません：")+Tr(text.substr(20).c_str());
     const std::pair<std::string,std::string> prefixes[]{
         {"Item uses unselected slots: ","未選択のスロットも使う装備があります。対象スロットを確認してください："},
         {"Camera preset saved: ","カメラプリセットを保存しました："},{"Empty camera slot: ","未登録の番号です。カメラ設定から現在の構図を保存してください："},

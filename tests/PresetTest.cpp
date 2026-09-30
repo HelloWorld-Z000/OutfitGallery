@@ -60,6 +60,19 @@ int main() {
         bool lowRejected=false;
         try {WriteStudioSettings(lowCamera,folder/"low-camera.json");} catch(const std::exception&) {lowRejected=true;}
         if(!lowRejected || ReadStudioSettings(folder/"low-camera.json").height!=-20) throw std::runtime_error("Invalid camera height overwrote valid settings");
+        if(ReadStudioSettings(folder/"low-camera.json").detachedPreview) throw std::runtime_error("Preview must default off");
+        settings.detachedPreview=true; settings.previewRect={.25f,.1f,.4f,.7f};
+        WriteStudioSettings(settings,folder/"preview.json");
+        const auto previewSettings=ReadStudioSettings(folder/"preview.json");
+        if(!previewSettings.detachedPreview || previewSettings.previewRect!=settings.previewRect) throw std::runtime_error("Preview settings not persisted");
+        auto badPreview=settings; badPreview.previewRect[2]=0;
+        bool previewRejected=false;
+        try {WriteStudioSettings(badPreview,folder/"preview.json");} catch(const std::exception&) {previewRejected=true;}
+        if(!previewRejected || ReadStudioSettings(folder/"preview.json").previewRect!=settings.previewRect) throw std::runtime_error("Invalid preview overwrote settings");
+        if(ReadStudioSettings(folder/"low-camera.json").followerTargeting) throw std::runtime_error("Follower targeting must default off");
+        settings.followerTargeting=true;
+        WriteStudioSettings(settings,folder/"follower.json");
+        if(!ReadStudioSettings(folder/"follower.json").followerTargeting || ReadStudioSettings(folder/"follower.json").previewRect!=settings.previewRect) throw std::runtime_error("Follower settings damaged preview settings");
         settings.startupTab="custom-7";
         WriteStudioSettings(settings,folder/"opening-settings.json");
         if(ReadStudioSettings(folder/"opening-settings.json").startupTab!="custom-7") throw std::runtime_error("Opening tab not persisted");

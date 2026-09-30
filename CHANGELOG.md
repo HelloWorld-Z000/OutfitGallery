@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.6 — Follower support (experimental)
+
+- Add optional crosshair targeting of current humanoid followers for outfit changes and photography. Share the photo library and independent preview with player mode; keep weapons/ammunition. First-person entry is recommended.
+- Track generated equipment separately for each actor and safely reclaim unused items after verified changes. Preserve pre-owned, transferred, customized, quest and ambiguous items. Persist cleanup identities in the SKSE co-save.
+- Add per-follower **Maintain this follower's outfit** and **Restore standard outfit**. Maintenance is opt-in, checks periodically, skips unsafe states, does not regenerate missing gear and stops repeated conflicts. Standard restoration releases maintenance without resetting inventory, changing AI or rewriting shared NPC outfit data. Leveled/undefined default armor is unsupported and reported.
+- Persist maintained actor/armor IDs with all-or-nothing load resolution. Add actor isolation, transfer, serialization and bounded-retry tests.
+- User-confirmed: travel/restart maintenance and cleanup, hidden default armor restoration, release staying off after restart, preservation of transferred/pre-owned items, and two-follower independence. Other frameworks and unusual outfits remain unverified.
+- Includes the optional movable/resizable independent preview introduced in 1.0.5. Follower support remains labeled experimental and off by default.
+
+## 1.0.5 — Independent preview
+
+- Optional movable/resizable live preview; disabled by default. Uses a centered camera and the same central crop for preview and saved photos. Original right-side mode remains available.
+- Persist preview layout, preserve image aspect ratio, reuse GPU texture, rebuild on resolution/device changes, and fall back to normal mode on unsupported capture formats/errors.
+- Support 8-bit, 10-bit and 16-bit floating-point preview textures. Improved preview and saved photos with Community Shaders vignette confirmed by the author. Other graphics configurations remain unverified.
+
 ## 1.0.4 — Replace conflicting armor in partial modes
 
 - Head/accessory presets now replace overlapping worn armor instead of rejecting pieces that also use other slots. A conflicting multi-slot wig or garment is unequipped as a whole. Unrelated armor, weapons, and ammunition remain outside the replacement scope.

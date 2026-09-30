@@ -2,8 +2,8 @@
 namespace Gallery {
 void InitializeManagedItems();
 void RegisterManagedItemEvents();
-void BeginManagedAddition();
-void AddManagedItems(RE::PlayerCharacter*, RE::TESBoundObject*, int count, bool previouslyAbsent);
-void TrackNewManagedItems();
-void ReclaimManagedItems(); // game thread, only after a verified successful change
+void BeginManagedAddition(RE::Actor*);
+void AddManagedItems(RE::Actor*, RE::TESBoundObject*, int count, bool previouslyAbsent);
+void TrackNewManagedItems(RE::Actor*);
+void ReclaimManagedItems(RE::Actor*); // game thread, only after a verified successful change
 }

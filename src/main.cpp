@@ -1,6 +1,7 @@
 #include "Capture.h"
 #include "Presets.h"
 #include "ManagedItems.h"
+#include "FollowerOutfits.h"
 #include "HoldButton.h"
 #pragma warning(push)
 #pragma warning(disable: 4099 5054)
@@ -15,7 +16,7 @@
 
 using namespace REL::literals;
 SKSEPluginInfo(
-    .Version = "1.0.4.0"_v,
+    .Version = "1.0.6.0"_v,
     .Name = "OutfitGallery",
     .Author = "Outfit Gallery contributors",
     .RuntimeCompatibility = { "1.5.97.0"_v, "1.6.353.0"_v, "1.6.640.0"_v, "1.6.1130.0"_v, "1.6.1170.0"_v }
@@ -38,6 +39,15 @@ std::string startupTab=initialCamera.startupTab;
 std::atomic<float> distance{initialCamera.distance}, height{initialCamera.height}, orbit{initialCamera.orbit}, pitch{initialCamera.pitch}, fov{initialCamera.fov}, lateral{initialCamera.lateral}, elevation{initialCamera.elevation};
 bool showNames=true, showCounts=true;
 bool addMissing{}, showCameraSettings{};
+std::atomic<bool> detachedPreview{}, cameraCentered{}, followerTargeting{};
+RE::ActorHandle studioActor, verificationActor; // game-thread only, never raw retained pointers
+std::atomic<bool> followerMaintained{};
+float targetHeading{}; // follower camera does not chase idle turning
+std::string studioActorName; // statusMutex, copied for UI
+std::atomic<bool> studioFollower{};
+std::array<float,4> previewRect{.54f,.08f,.45f,.84f};
+bool resetPreviewRect=true;
+unsigned previewSettled{}; // render-thread only
 std::atomic<std::uint32_t> partialSlots{0x1803};
 std::optional<Preset> revealAfterSave; // guarded by presetsMutex
 int gridColumns=3; // render thread after initialization
@@ -50,7 +60,7 @@ ULONGLONG settingsChangedAt{};
 const std::filesystem::path settingsFile="Data/SKSE/Plugins/OutfitGallery/StudioSettings.json";
 void SaveSettingsIfDue(bool force=false) {
     if (!force && (!settingsChangedAt || GetTickCount64()-settingsChangedAt<600)) return;
-    try { WriteStudioSettings({distance.load(),height.load(),orbit.load(),pitch.load(),fov.load(),gridColumns,showNames,showCounts,language,allowFreeCamera.load(),addMissing,lateral.load(),elevation.load(),partialSlots.load(),startupTab},settingsFile); }
+    try { WriteStudioSettings({distance.load(),height.load(),orbit.load(),pitch.load(),fov.load(),gridColumns,showNames,showCounts,language,allowFreeCamera.load(),addMissing,lateral.load(),elevation.load(),partialSlots.load(),startupTab,detachedPreview.load(),previewRect,followerTargeting.load()},settingsFile); }
     catch(const std::exception& e) { SKSE::log::error("Settings save: {}",e.what()); }
     settingsChangedAt=0;
 }
@@ -167,6 +177,7 @@ void Close() {
         if (auto* ui = RE::UI::GetSingleton()) ui->ShowMenus(saved.menusVisible);
         saved.valid = false;
     }
+    studioActor.reset(); studioFollower=false;
     Release();
 }
 
@@ -223,6 +234,20 @@ void Open() {
         if (sitting != RE::SIT_SLEEP_STATE::kNormal) reason += std::format("Sit/sleep state {}. ", static_cast<unsigned>(sitting));
         Refuse(reason); return;
     }
+    RE::NiPointer<RE::Actor> target{player};
+    if(followerTargeting) {
+        auto* pick=RE::CrosshairPickData::GetSingleton();
+        auto reference=pick?pick->GetActiveTarget().get():RE::NiPointer<RE::TESObjectREFR>{};
+        if(reference) if(auto* actor=reference->As<RE::Actor>(); actor && actor!=player) {
+            if(!actor->IsPlayerTeammate() || !actor->HasKeywordString("ActorTypeNPC")) {
+                Refuse("Aim at a humanoid current follower, or look away to select yourself."); return;
+            }
+            if(!actor->Get3D() || actor->IsDisabled() || actor->IsDead() || actor->IsInCombat() || actor->IsOnMount() || actor->AsActorState()->IsSwimming() || actor->AsActorState()->GetSitSleepState()!=RE::SIT_SLEEP_STATE::kNormal) {
+                Refuse("The follower must be alive, loaded, standing and out of combat."); return;
+            }
+            target=RE::NiPointer<RE::Actor>{actor};
+        }
+    }
     const bool wasFree=camera->IsInFreeCameraMode();
     if (!camera->IsInFirstPerson() && !camera->IsInThirdPerson() && !(wasFree && allowFreeCamera.load())) { SetStatus("Use a normal first/third-person view, or enable free-camera entry."); return; }
     auto* third = static_cast<RE::ThirdPersonState*>(camera->GetRuntimeData().cameraStates[RE::CameraState::kThirdPerson].get());
@@ -233,6 +258,11 @@ void Open() {
     saved.wasFree=wasFree;
     if(!wasFree) {camera->ForceThirdPerson(); camera->ToggleFreeCameraMode(false);}
     if (!camera->IsInFreeCameraMode()) { Close(); SetStatus("Could not enter the studio camera."); return; }
+    studioActor=target->CreateRefHandle(); targetHeading=target->GetAngleZ();
+    studioFollower=target.get()!=player;
+    followerMaintained=IsFollowerOutfitMaintained(target.get());
+    {std::scoped_lock lock(statusMutex); studioActorName=target->GetName()?target->GetName():"";}
+    SKSE::log::info("Studio target: {} ({:08X}), follower={}",target->GetName(),target->GetFormID(),studioFollower.load());
     ui->ShowMenus(false);
     active = true;
     ++studioOpenSerial;
@@ -245,10 +275,13 @@ void VerifyEquipment(bool immediate=false) {
     const bool due=GetTickCount64()>=verificationDue;
     if(!immediate && !due) return;
     try {
-        const auto actual=SnapshotEquipment(verificationTarget.slotMask);
+        auto actor=verificationActor.get();
+        if(!actor || !actor->Get3D() || actor->IsDisabled() || actor->IsDead()) {verificationTicks=0; return;}
+        const auto actual=SnapshotEquipment(actor.get(),verificationTarget.slotMask);
         if(SameEquipment(verificationTarget,actual)) {
             verificationTicks=0;
-            ReclaimManagedItems();
+            ReclaimManagedItems(actor.get());
+            RefreshFollowerOutfit(actor.get());
             SetStatus("Outfit restored: "+verificationTarget.name);
         } else if(due) {
             verificationTicks=0;
@@ -265,15 +298,20 @@ void Tick() {
     VerifyEquipment(requested==2 || requested==4);
     if (requested == 2) { Close(); return; }
     if (requested == 1) Open();
-    if (!active) return;
+    if (!active) {MaintainFollowerOutfits(); return;}
     auto* player = RE::PlayerCharacter::GetSingleton();
     auto* camera = RE::PlayerCamera::GetSingleton();
     if (!window->IsOpen || !player || !player->Get3D() || !camera || !camera->IsInFreeCameraMode() || player->IsDead() || player->IsInCombat()) { Close(); return; }
+    auto subject=studioActor.get();
+    if(!subject || !subject->Get3D() || subject->IsDisabled() || subject->IsDead() || subject->IsInCombat() ||
+       (subject.get()!=player && (!subject->IsPlayerTeammate() || subject->IsOnMount() || subject->AsActorState()->IsSwimming() || subject->AsActorState()->GetSitSleepState()!=RE::SIT_SLEEP_STATE::kNormal))) {
+        Close(); SetStatus("Studio closed: target is no longer available."); return;
+    }
     if (requested == 3 || requested == 5 || requested == 6) {
         try {
             const auto scope=requested==5?partialSlots.load():0;
             if(requested==5 && !scope) throw std::runtime_error("Select at least one slot.");
-            auto p = requested==6?SnapshotAccessories():SnapshotEquipment(scope);
+            auto p = requested==6?SnapshotAccessories(subject.get()):SnapshotEquipment(subject.get(),scope);
             { std::scoped_lock lock(presetsMutex); p.name = requestedName.empty() ? "Outfit " + std::to_string(presets.size()+1) : requestedName; stagedPreset = std::move(p); }
             captureRequested = true;
         } catch (const std::exception& e) { saveBusy = false; SetStatus(e.what()); }
@@ -283,19 +321,40 @@ void Tick() {
         try {
             Preset p; bool add;
             { std::scoped_lock lock(presetsMutex); p = requestedPreset; add = requestedAddMissing; }
-            SetStatus(ApplyEquipment(p,add)); verificationTarget=ClothingPreset(p); verificationDue=GetTickCount64()+750; verificationTicks=1;
+            SetStatus(ApplyEquipment(subject.get(),p,add)); verificationActor=subject->CreateRefHandle(); verificationTarget=ClothingPreset(p); verificationDue=GetTickCount64()+750; verificationTicks=1;
             VerifyEquipment(true);
         } catch (const std::exception& e) { SetStatus(e.what()); }
     }
+    if(studioFollower && !saveBusy && (requested==7 || requested==8 || requested==9)) {
+        try {
+            if(requested==7) {
+                RememberFollowerOutfit(subject.get());
+                SetStatus("Follower outfit maintenance enabled.");
+            } else {
+                ReleaseFollowerOutfit(subject.get());
+                if(requested==8) SetStatus("Follower outfit maintenance disabled.");
+                else {
+                    verificationTicks=0;
+                    const auto original=DefaultFollowerOutfit(subject.get());
+                    SetStatus(ApplyEquipment(subject.get(),original,true));
+                    verificationActor=subject->CreateRefHandle(); verificationTarget=original;
+                    verificationDue=GetTickCount64()+750; verificationTicks=1;
+                    VerifyEquipment(true);
+                }
+            }
+        }catch(const std::exception& e) {SetStatus(e.what());}
+    }
+    followerMaintained=IsFollowerOutfitMaintained(subject.get());
     auto* free = static_cast<RE::FreeCameraState*>(camera->currentState.get());
     const float radians = std::numbers::pi_v<float> / 180.f;
-    const float radial = player->GetAngleZ() + orbit.load() * radians;
+    const float radial = (studioFollower ? targetHeading : subject->GetAngleZ()) + orbit.load() * radians;
     const float yaw = radial + std::numbers::pi_v<float>;
     const float dist = distance.load();
     const float angle=elevation.load()*radians;
     const float planar=dist*std::cos(angle);
-    const float side = dist * std::tan(fov.load() * radians * 0.5f) * 0.53f + lateral.load();
-    const auto pos = player->GetPosition();
+    const bool centered=detachedPreview.load();
+    const float side = dist * std::tan(fov.load() * radians * 0.5f) * (centered ? 0.f : 0.53f) + lateral.load();
+    const auto pos = subject->GetPosition();
     free->translation = {pos.x + std::sin(radial)*planar - std::cos(yaw)*side,
         pos.y + std::cos(radial)*planar + std::sin(yaw)*side, pos.z + height.load() + dist*std::sin(angle)};
     free->rotation = {pitch.load() * radians + angle, yaw};
@@ -303,10 +362,11 @@ void Tick() {
     camera->rotationInput = {};
     camera->translationInput = {};
     camera->zoomInput = 0;
+    cameraCentered=centered;
 }
 
 void QueueTick() {
-    if ((active || command.load() || verificationTicks.load()) && !pending.exchange(true)) {
+    if ((active || command.load() || verificationTicks.load() || FollowerMaintenanceDue()) && !pending.exchange(true)) {
         const unsigned generation = epoch.load();
         SKSE::GetTaskInterface()->AddTask([generation] {
             if (generation == epoch && ready) Tick();
@@ -322,10 +382,20 @@ void __stdcall OnFrame(SKSEMenuFramework::Model::EventType event) {
     // its registration/lookup APIs here. Game mutations go to one coalesced task.
     QueueTick();
     if (active && captureRequested.exchange(false)) captureDelay = 3;
-    if (!active) captureDelay = 0;
-    if (captureDelay && --captureDelay == 0 && active) {
+    if (!active) {captureDelay=0; previewSettled=0; ResetLivePreview();}
+    else if(cameraCentered.load()!=detachedPreview.load()) {previewSettled=0; ResetLivePreview();}
+    else previewSettled=std::min(previewSettled+1,4u);
+    if(active && detachedPreview && previewSettled>=3) {
+        try {UpdateLivePreview();}
+        catch(const std::exception& e) {
+            ResetLivePreview(); detachedPreview=false; previewSettled=0;
+            captureDelay=0; saveBusy=false; settingsChangedAt=GetTickCount64();
+            SetStatus(std::string("Preview disabled: ")+e.what());
+        }
+    } else if(!detachedPreview) ResetLivePreview();
+    if (captureDelay && previewSettled>=3 && --captureDelay == 0 && active) {
         try {
-            const auto file = CapturePortrait();
+            const auto file = CapturePortrait(detachedPreview.load());
             { std::scoped_lock lock(statusMutex); lastImage = file.generic_string(); }
             Preset p;
             { std::scoped_lock lock(presetsMutex); p = stagedPreset; }
@@ -430,6 +500,21 @@ void __stdcall RenderStudio() {
     UI::SetNextWindowSize({screen.x*0.515f, screen.y*0.97f}, UI::ImGuiCond_Always);
     bool opened = true;
     if (UI::Begin("Outfit Gallery", &opened, UI::ImGuiWindowFlags_NoResize | UI::ImGuiWindowFlags_NoMove | UI::ImGuiWindowFlags_NoCollapse | UI::ImGuiWindowFlags_NoNavInputs)) {
+        if(studioFollower) {
+            std::string targetName; {std::scoped_lock lock(statusMutex); targetName=studioActorName;}
+            UI::Text(Tr("Follower: %s"),targetName.c_str());
+            UI::SameLine(0.f,UI::GetStyle()->ItemSpacing.x*2.f);
+            UI::TextWrapped("%s",Tr("Experimental: Other mods may change the outfit."));
+            UI::BeginDisabled(saveBusy || verificationTicks.load()!=0);
+            bool keep=followerMaintained.load();
+            if(UI::Checkbox(Tr("Maintain this follower's outfit"),&keep)) command=keep?7:8;
+            if(UI::IsItemHovered()) UI::SetTooltip("%s",Tr("Checks every 5 seconds while closed. Missing items or repeated conflicts disable maintenance."));
+            UI::SameLine();
+            if(UI::Button(Tr("Restore standard outfit"))) command=9;
+            UI::EndDisabled();
+            if(UI::IsItemHovered()) UI::SetTooltip("%s",Tr("Disables maintenance and restores standard armor. Given items and weapons are kept."));
+        }
+        if(!studioFollower && followerTargeting) UI::TextUnformatted(Tr("Target: Player"));
         UI::InputText(Label("Preset name"),name,sizeof(name));
         UI::SameLine(); UI::SetCursorPosX(UI::GetWindowWidth()-UI::GetStyle()->WindowPadding.x-UI::GetFrameHeight());
         if(UI::Button("?##help",{UI::GetFrameHeight(),0})) helpOpen=!helpOpen;
@@ -490,16 +575,50 @@ void __stdcall RenderStudio() {
         UI::End();
         if(RawPadPressed(8192)) helpOpen=false;
     }
-    // A transparent input surface makes the photo frame a mouse target. ImGui
-    // handles hit testing, so an overlapping help window or popup wins normally.
-    UI::SetNextWindowPos({screen.x*.54f,screen.y*.08f},UI::ImGuiCond_Always);
-    UI::SetNextWindowSize({screen.x*.45f,screen.y*.84f},UI::ImGuiCond_Always);
+    const bool preview=detachedPreview.load();
+    bool previewOpen=true;
+    static UI::ImVec2 lastScreen{};
+    if(lastScreen.x!=screen.x || lastScreen.y!=screen.y) {resetPreviewRect=true; lastScreen=screen;}
+    auto flags=UI::ImGuiWindowFlags_NoSavedSettings|UI::ImGuiWindowFlags_NoNav|UI::ImGuiWindowFlags_NoScrollWithMouse|UI::ImGuiWindowFlags_NoScrollbar;
+    if(preview) {
+        UI::SetNextWindowSizeConstraints({160,160},{screen.x,screen.y});
+        if(resetPreviewRect) {
+            const float w=std::clamp(previewRect[2]*screen.x,160.f,screen.x);
+            const float h=std::clamp(previewRect[3]*screen.y,160.f,screen.y);
+            UI::SetNextWindowPos({std::clamp(previewRect[0]*screen.x,0.f,screen.x-w),std::clamp(previewRect[1]*screen.y,0.f,screen.y-h)},UI::ImGuiCond_Always);
+            UI::SetNextWindowSize({w,h},UI::ImGuiCond_Always);
+            resetPreviewRect=false;
+        }
+        flags|=UI::ImGuiWindowFlags_NoCollapse;
+        UI::SetNextWindowBgAlpha(1.f);
+    } else {
+        UI::SetNextWindowPos({screen.x*.54f,screen.y*.08f},UI::ImGuiCond_Always);
+        UI::SetNextWindowSize({screen.x*.45f,screen.y*.84f},UI::ImGuiCond_Always);
+        flags|=UI::ImGuiWindowFlags_NoDecoration|UI::ImGuiWindowFlags_NoMove|UI::ImGuiWindowFlags_NoBackground|UI::ImGuiWindowFlags_NoBringToFrontOnFocus;
+    }
     UI::PushStyleVar(UI::ImGuiStyleVar_WindowPadding,{0,0});
-    if(UI::Begin("##cameraMouse",nullptr,UI::ImGuiWindowFlags_NoDecoration|UI::ImGuiWindowFlags_NoMove|UI::ImGuiWindowFlags_NoBackground|UI::ImGuiWindowFlags_NoSavedSettings|UI::ImGuiWindowFlags_NoNav|UI::ImGuiWindowFlags_NoBringToFrontOnFocus|UI::ImGuiWindowFlags_NoScrollWithMouse)) {
-        UI::InvisibleButton("##pan",UI::GetContentRegionAvail(),UI::ImGuiButtonFlags_MouseButtonLeft|UI::ImGuiButtonFlags_MouseButtonRight);
+    if(UI::Begin(preview?Label("Live preview"):"##cameraMouse",preview?&previewOpen:nullptr,flags)) {
+        auto available=UI::GetContentRegionAvail();
+        UI::ImVec2 imageSize=available;
+        float mouseScale=1.f;
+        if(preview) {
+            const auto pos=UI::GetWindowPos(), size=UI::GetWindowSize();
+            std::array<float,4> rect{std::clamp(pos.x/screen.x,0.f,1.f),std::clamp(pos.y/screen.y,0.f,1.f),std::clamp(size.x/screen.x,.1f,1.f),std::clamp(size.y/screen.y,.1f,1.f)};
+            if(rect!=previewRect) {previewRect=rect; settingsChangedAt=GetTickCount64();}
+            const float aspect=LivePreviewView()?LivePreviewAspect():(screen.x*.45f)/(screen.y*.84f);
+            imageSize={std::min(available.x,available.y*aspect),0};
+            imageSize.y=imageSize.x/aspect;
+            auto cursor=UI::GetCursorScreenPos();
+            cursor.x+=(available.x-imageSize.x)*.5f; cursor.y+=(available.y-imageSize.y)*.5f;
+            UI::SetCursorScreenPos(cursor);
+            if(auto view=LivePreviewView(); view && previewSettled>=3)
+                UI::ImDrawListManager::AddImage(UI::GetWindowDrawList(),view,cursor,{cursor.x+imageSize.x,cursor.y+imageSize.y},{0,0},{1,1},0xFFFFFFFF);
+            mouseScale=screen.x*.45f/std::max(1.f,imageSize.x);
+        }
+        UI::InvisibleButton("##pan",{std::max(1.f,imageSize.x),std::max(1.f,imageSize.y)},UI::ImGuiButtonFlags_MouseButtonLeft|UI::ImGuiButtonFlags_MouseButtonRight);
         if(!saveBusy && !helpOpen && !bindingMode) {
             auto* io=UI::GetIO();
-            const float units=2.f*distance.load()*std::tan(fov.load()*.00872664626f)/std::max(1.f,screen.x);
+            const float units=2.f*distance.load()*std::tan(fov.load()*.00872664626f)/std::max(1.f,screen.x)*mouseScale;
             bool changed=false;
             if(UI::IsItemActive() && UI::IsMouseDragging(0) && !UI::IsMouseDown(1)) {
                 lateral=std::clamp(lateral.load()+io->MouseDelta.x*units,-150.f,150.f);
@@ -510,8 +629,8 @@ void __stdcall RenderStudio() {
                 // Screen-relative sensitivity keeps the same gesture consistent
                 // across resolutions. Wrap orbit continuously; limit elevation
                 // to the same range as its slider.
-                orbit=std::remainder(orbit.load()+io->MouseDelta.x*180.f/std::max(1.f,screen.x),360.f);
-                elevation=std::clamp(elevation.load()+io->MouseDelta.y*180.f/std::max(1.f,screen.y),-60.f,60.f);
+                orbit=std::remainder(orbit.load()+io->MouseDelta.x*mouseScale*180.f/std::max(1.f,screen.x),360.f);
+                elevation=std::clamp(elevation.load()+io->MouseDelta.y*mouseScale*180.f/std::max(1.f,screen.y),-60.f,60.f);
                 changed=io->MouseDelta.x!=0 || io->MouseDelta.y!=0;
             }
             if(UI::IsItemHovered() && io->MouseWheel!=0) {
@@ -521,14 +640,15 @@ void __stdcall RenderStudio() {
         }
     }
     UI::End(); UI::PopStyleVar();
+    if(preview && !previewOpen && !saveBusy) {detachedPreview=false; previewSettled=0; settingsChangedAt=GetTickCount64();}
     auto* draw = UI::GetForegroundDrawList();
-    UI::ImDrawListManager::AddRect(draw, {screen.x*.54f,screen.y*.08f}, {screen.x*.99f,screen.y*.92f}, 0xFF9BC6E8, 0, 0, 2);
+    if(!preview) UI::ImDrawListManager::AddRect(draw, {screen.x*.54f,screen.y*.08f}, {screen.x*.99f,screen.y*.92f}, 0xFF9BC6E8, 0, 0, 2);
     if (!opened || UI::IsKeyPressed(UI::ImGuiKey_Escape, false)) command = 2;
 }
 
 void __stdcall RenderSettings() {
     RenderHotkeys();
-    UI::TextUnformatted(Tr("Outfit Gallery 1.0.4 - photo presets"));
+    UI::TextUnformatted(Tr("Outfit Gallery 1.0.6 - photo presets"));
     UI::TextWrapped(Tr("Close this menu and press the configured hotkey (default F8) while standing in a safe open area."));
     UI::TextUnformatted(Tr("F9 in the studio saves a photo and equipment. Click a preset photo to apply."));
     UI::Text(Tr("SmoothCam API: %s / TDM API: %s"), smooth ? "ready" : "not available", tdm ? "ready" : "not available");
@@ -605,7 +725,7 @@ void Message(SKSE::MessagingInterface::Message* message) {
         try {
             if(std::filesystem::exists(settingsFile)) {
                 const auto s=ReadStudioSettings(settingsFile);
-                distance=s.distance; height=s.height; orbit=s.orbit; pitch=s.pitch; fov=s.fov; lateral=s.lateral; elevation=s.elevation; gridColumns=s.columns; showNames=s.showNames; showCounts=s.showCounts; language=s.language; allowFreeCamera=s.allowFreeCamera; addMissing=s.addMissing; partialSlots=s.headSlots; startupTab=s.startupTab;
+                distance=s.distance; height=s.height; orbit=s.orbit; pitch=s.pitch; fov=s.fov; lateral=s.lateral; elevation=s.elevation; gridColumns=s.columns; showNames=s.showNames; showCounts=s.showCounts; language=s.language; allowFreeCamera=s.allowFreeCamera; addMissing=s.addMissing; partialSlots=s.headSlots; startupTab=s.startupTab; detachedPreview=s.detachedPreview; previewRect=s.previewRect; followerTargeting=s.followerTargeting;
                 SKSE::log::info("Loaded persistent studio settings");
             }
         } catch(const std::exception& e) { SetStatus(std::string("Camera settings: ")+e.what()); }
@@ -660,7 +780,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
     Gallery::saveHotkey = GetPrivateProfileIntW(L"Input", L"SaveHotkey", 67, ini.c_str());
     Gallery::captureKeys[0]=Gallery::saveHotkey;
     Gallery::gamepadHotkey = GetPrivateProfileIntW(L"Input", L"GamepadHotkey", 32, ini.c_str());
-    SKSE::log::info("OutfitGallery 1.0.4 release; runtime {}; key={}", runtime.string(), Gallery::hotkey.load());
+    SKSE::log::info("OutfitGallery 1.0.6; runtime {}; key={}", runtime.string(), Gallery::hotkey.load());
     return SKSE::GetMessagingInterface()->RegisterListener(Gallery::Message);
 }
 

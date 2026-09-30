@@ -75,6 +75,66 @@ int main() {
         const auto midtone=*static_cast<const uint32_t*>(mapped.pData);
         context->Unmap(staging.Get(),0);
         if(midtone!=0xFF808080) throw std::runtime_error("Portrait midtone values changed");
+        // Centered mode must exclude the old right-hand crop. Mark only the
+        // center blue and verify every decoded pixel, not just dimensions.
+        std::fill(pixels.begin(),pixels.end(),0xFF0000FF);
+        for(UINT y=80;y<920;++y) for(UINT x=275;x<725;++x) pixels[y*size+x]=0xFFFF0000;
+        desc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;
+        ComPtr<ID3D11Texture2D> centered;
+        Check(device->CreateTexture2D(&desc,&initial,&centered));
+        const auto centerPath=Gallery::SavePortraitTexture(centered.Get(),"capture-test-output",1024,true);
+        ComPtr<IWICBitmapDecoder> centerDecoder;
+        Check(factory->CreateDecoderFromFilename(centerPath.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&centerDecoder));
+        ComPtr<IWICBitmapFrameDecode> centerFrame; Check(centerDecoder->GetFrame(0,&centerFrame));
+        Check(centerFrame->GetSize(&w,&h));
+        if(w!=450 || h!=840) throw std::runtime_error("Centered dimensions wrong");
+        ComPtr<IWICFormatConverter> centerConverter; Check(factory->CreateFormatConverter(&centerConverter));
+        Check(centerConverter->Initialize(centerFrame.Get(),GUID_WICPixelFormat32bppRGBA,WICBitmapDitherTypeNone,nullptr,0,WICBitmapPaletteTypeCustom));
+        actual.resize(w*h);
+        Check(centerConverter->CopyPixels(nullptr,w*4,UINT(actual.size()*4),reinterpret_cast<BYTE*>(actual.data())));
+        for(auto pixel:actual) if(pixel!=0xFFFF0000) throw std::runtime_error("Centered crop includes outside pixels");
+        Gallery::UpdateLivePreviewTexture(centered.Get());
+        auto* live=static_cast<ID3D11ShaderResourceView*>(Gallery::LivePreviewView());
+        if(!live || std::abs(Gallery::LivePreviewAspect()-450.f/840.f)>.00001f) throw std::runtime_error("Live preview dimensions wrong");
+        ComPtr<ID3D11Resource> liveResource; live->GetResource(&liveResource);
+        ComPtr<ID3D11Texture2D> liveTexture; Check(liveResource.As(&liveTexture));
+        liveTexture->GetDesc(&readDesc);
+        readDesc.Usage=D3D11_USAGE_STAGING; readDesc.BindFlags=0; readDesc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+        ComPtr<ID3D11Texture2D> liveRead; Check(device->CreateTexture2D(&readDesc,nullptr,&liveRead));
+        context->CopyResource(liveRead.Get(),liveTexture.Get());
+        Check(context->Map(liveRead.Get(),0,D3D11_MAP_READ,0,&mapped));
+        for(UINT y=0;y<readDesc.Height;++y) {
+            auto* row=reinterpret_cast<const uint32_t*>(static_cast<const BYTE*>(mapped.pData)+y*mapped.RowPitch);
+            for(UINT x=0;x<readDesc.Width;++x) if(row[x]!=0xFFFF0000) throw std::runtime_error("Live preview crop differs from saved photograph");
+        }
+        context->Unmap(liveRead.Get(),0);
+        Gallery::UpdateLivePreviewTexture(gray.Get());
+        if(Gallery::LivePreviewView()!=live) throw std::runtime_error("Same-size preview reallocates every frame");
+        context->CopyResource(liveRead.Get(),liveTexture.Get());
+        Check(context->Map(liveRead.Get(),0,D3D11_MAP_READ,0,&mapped));
+        if(*static_cast<const uint32_t*>(mapped.pData)!=0xFF808080) throw std::runtime_error("Live preview failed to update");
+        context->Unmap(liveRead.Get(),0);
+        auto resizedDesc=desc; resizedDesc.Width=640; resizedDesc.Height=480;
+        ComPtr<ID3D11Texture2D> resized; Check(device->CreateTexture2D(&resizedDesc,nullptr,&resized));
+        Gallery::UpdateLivePreviewTexture(resized.Get());
+        auto* resizedView=static_cast<ID3D11ShaderResourceView*>(Gallery::LivePreviewView());
+        ComPtr<ID3D11Resource> resizedResource; resizedView->GetResource(&resizedResource);
+        ComPtr<ID3D11Texture2D> resizedTexture; Check(resizedResource.As(&resizedTexture));
+        resizedTexture->GetDesc(&readDesc);
+        if(readDesc.Width!=288 || readDesc.Height!=403) throw std::runtime_error("Preview failed resolution change");
+        for(auto format : {DXGI_FORMAT_R10G10B10A2_UNORM,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R10G10B10A2_TYPELESS}) {
+            resizedDesc.Format=format;
+            ComPtr<ID3D11Texture2D> wide;
+            Check(device->CreateTexture2D(&resizedDesc,nullptr,&wide));
+            Gallery::UpdateLivePreviewTexture(wide.Get());
+            auto* wideView=static_cast<ID3D11ShaderResourceView*>(Gallery::LivePreviewView());
+            if(!wideView) throw std::runtime_error("High precision preview rejected");
+            D3D11_SHADER_RESOURCE_VIEW_DESC wideDesc{}; wideView->GetDesc(&wideDesc);
+            const auto expected=format==DXGI_FORMAT_R10G10B10A2_TYPELESS?DXGI_FORMAT_R10G10B10A2_UNORM:format;
+            if(wideDesc.Format!=expected) throw std::runtime_error("High precision preview view format wrong");
+        }
+        Gallery::ResetLivePreview();
+        if(Gallery::LivePreviewView()) throw std::runtime_error("Preview resource not released");
         bool rejected=false;
         try { (void)Gallery::SavePortraitTexture(nullptr,"capture-test-output"); }
         catch(const std::runtime_error&) { rejected=true; }

@@ -40,6 +40,20 @@ void RenderBrowser(bool& addMissing) {
             UI::EndCombo();
         }
         RenderHotkeys();
+        bool followers=followerTargeting.load();
+        if(UI::Checkbox(Label("Select follower under crosshair (experimental)"),&followers)) {followerTargeting=followers; settingsChangedAt=GetTickCount64();}
+        if(followers) UI::TextWrapped(Tr("Close the gallery, aim at a current humanoid follower and press the opening hotkey. Look away to select yourself. Target is fixed until close."));
+        bool preview=detachedPreview.load();
+        UI::BeginDisabled(saveBusy);
+        if(UI::Checkbox(Label("Independent preview"),&preview)) {
+            detachedPreview=preview; previewSettled=0; resetPreviewRect=true;
+            settingsChangedAt=GetTickCount64();
+        }
+        if(preview) {
+            UI::TextWrapped(Tr("Drag the preview title to move it; drag its corner to resize. Photos use the centered view. Effects depend on your graphics setup."));
+            if(UI::Button(Label("Reset preview position"))) {previewRect={.54f,.08f,.45f,.84f}; resetPreviewRect=true; settingsChangedAt=GetTickCount64();}
+        }
+        UI::EndDisabled();
         std::vector<Category> openingTabs{{"","All"}};
         openingTabs.insert(openingTabs.end(),library.categories.begin(),library.categories.end());
         openingTabs.push_back({"#head","Head equipment"});

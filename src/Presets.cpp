@@ -46,6 +46,8 @@ void ValidateSettings(const StudioSettings& s) {
     if(s.headSlots & ~0x1803u) throw std::runtime_error("Invalid head slots");
     if(s.language<0 || s.language>1) throw std::runtime_error("Invalid language");
     auto valid=[](float v,float low,float high){return std::isfinite(v) && v>=low && v<=high;};
+    for(auto v:s.previewRect) if(!valid(v,0.f,1.f)) throw std::runtime_error("Invalid preview rectangle");
+    if(s.previewRect[2]<.1f || s.previewRect[3]<.1f) throw std::runtime_error("Preview rectangle too small");
     if (!valid(s.distance,10,500) || !valid(s.height,-20,180) || !valid(s.orbit,-180,180) || !valid(s.pitch,-25,25) || !valid(s.lateral,-150,150) || !valid(s.elevation,-60,60) || !valid(s.fov,35,90) || s.columns<2 || s.columns>5)
         throw std::runtime_error("Invalid studio settings");
 }
@@ -57,12 +59,14 @@ StudioSettings ReadStudioSettings(const std::filesystem::path& path) {
     s.showNames=j.value("showNames",true); s.showCounts=j.value("showCounts",true); s.language=j.value("language",0); s.allowFreeCamera=j.value("allowFreeCamera",false); s.addMissing=j.value("addMissing",false);
     s.headSlots=j.value("headSlots",0x1803u);
     s.startupTab=j.value("startupTab",std::string{});
+    s.followerTargeting=j.value("followerTargeting",false);
+    s.detachedPreview=j.value("detachedPreview",false); s.previewRect=j.value("previewRect",s.previewRect);
     s.lateral=j.value("lateral",0.f); s.elevation=j.value("elevation",0.f);
     ValidateSettings(s); return s;
 }
 void WriteStudioSettings(const StudioSettings& s,const std::filesystem::path& path) {
     ValidateSettings(s);
-    Json j={{"schema",1},{"distance",s.distance},{"height",s.height},{"orbit",s.orbit},{"pitch",s.pitch},{"fov",s.fov},{"columns",s.columns},{"showNames",s.showNames},{"showCounts",s.showCounts},{"language",s.language},{"allowFreeCamera",s.allowFreeCamera},{"addMissing",s.addMissing},{"lateral",s.lateral},{"elevation",s.elevation},{"headSlots",s.headSlots},{"startupTab",s.startupTab}};
+    Json j={{"schema",1},{"distance",s.distance},{"height",s.height},{"orbit",s.orbit},{"pitch",s.pitch},{"fov",s.fov},{"columns",s.columns},{"showNames",s.showNames},{"showCounts",s.showCounts},{"language",s.language},{"allowFreeCamera",s.allowFreeCamera},{"addMissing",s.addMissing},{"lateral",s.lateral},{"elevation",s.elevation},{"headSlots",s.headSlots},{"startupTab",s.startupTab},{"detachedPreview",s.detachedPreview},{"previewRect",s.previewRect},{"followerTargeting",s.followerTargeting}};
     std::filesystem::create_directories(path.parent_path());
     auto tmp=path; tmp+=".tmp";
     {std::ofstream out(tmp,std::ios::binary|std::ios::trunc); out.exceptions(std::ios::badbit|std::ios::failbit); out<<j.dump(2); out.close();}
