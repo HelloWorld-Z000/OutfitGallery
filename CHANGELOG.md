@@ -2,6 +2,7 @@
 
 ## 1.0.6 — Follower support (experimental)
 
+- Improve independent preview clarity by aligning the image to physical pixels and avoiding enlargement beyond native resolution. Smaller windows still scale to fit; larger windows may show margins. Full-body and close-up comparisons checked by the author in their environment.
 - Add optional crosshair targeting of current humanoid followers for outfit changes and photography. Share the photo library and independent preview with player mode; keep weapons/ammunition. First-person entry is recommended.
 - Track generated equipment separately for each actor and safely reclaim unused items after verified changes. Preserve pre-owned, transferred, customized, quest and ambiguous items. Persist cleanup identities in the SKSE co-save.
 - Add per-follower **Maintain this follower's outfit** and **Restore standard outfit**. Maintenance is opt-in, checks periodically, skips unsafe states, does not regenerate missing gear and stops repeated conflicts. Standard restoration releases maintenance without resetting inventory, changing AI or rewriting shared NPC outfit data. Leveled/undefined default armor is unsupported and reported.

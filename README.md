@@ -36,6 +36,8 @@ Author testing confirmed follower changes and photography, original/same-type it
 
 ## Independent preview
 
+The preview preserves aspect ratio and aligns the image to physical pixels. It fits smaller windows and displays at native resolution in larger windows without enlarging the source image. Extra space appears as black margins; these margins are not included in saved photographs. Use camera distance to enlarge the character.
+
 Enable **Options > Independent preview**. It is off by default. The camera uses a centered composition while enabled, and a movable, resizable window displays the central crop before framework UI drawing. Drag the title bar to move, the corner to resize, and the image to adjust the camera. Use **Reset preview position** if needed. Position, size and the option are saved; camera presets remain shared with normal mode.
 
 The displayed image keeps its aspect ratio. Saved photos use the same central crop regardless of window position/size. The original world remains visible behind the window. Turning the option off restores the normal right-side framing without changing camera slider values. No separate world render or actor clone is created. Live copying uses a reusable GPU texture; PNG encoding only runs when registering an outfit.

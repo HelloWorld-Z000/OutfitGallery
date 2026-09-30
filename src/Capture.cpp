@@ -72,6 +72,11 @@ void DisposePortraitView(const std::string& path) {portraitViews.erase(path);}
 void ResetLivePreview() { liveView.Reset(); liveTexture.Reset(); }
 void* LivePreviewView() { return liveView.Get(); }
 float LivePreviewAspect() { return liveAspect; }
+std::array<unsigned,2> LivePreviewSize() {
+    D3D11_TEXTURE2D_DESC desc{};
+    if(liveTexture) liveTexture->GetDesc(&desc);
+    return {desc.Width,desc.Height};
+}
 void UpdateLivePreview() {
     using Microsoft::WRL::ComPtr;
     auto* window=RE::BSGraphics::Renderer::GetCurrentRenderWindow();

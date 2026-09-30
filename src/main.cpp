@@ -1,4 +1,5 @@
 #include "Capture.h"
+#include "PreviewLayout.h"
 #include "Presets.h"
 #include "ManagedItems.h"
 #include "FollowerOutfits.h"
@@ -605,11 +606,14 @@ void __stdcall RenderStudio() {
             const auto pos=UI::GetWindowPos(), size=UI::GetWindowSize();
             std::array<float,4> rect{std::clamp(pos.x/screen.x,0.f,1.f),std::clamp(pos.y/screen.y,0.f,1.f),std::clamp(size.x/screen.x,.1f,1.f),std::clamp(size.y/screen.y,.1f,1.f)};
             if(rect!=previewRect) {previewRect=rect; settingsChangedAt=GetTickCount64();}
-            const float aspect=LivePreviewView()?LivePreviewAspect():(screen.x*.45f)/(screen.y*.84f);
-            imageSize={std::min(available.x,available.y*aspect),0};
-            imageSize.y=imageSize.x/aspect;
             auto cursor=UI::GetCursorScreenPos();
-            cursor.x+=(available.x-imageSize.x)*.5f; cursor.y+=(available.y-imageSize.y)*.5f;
+            const auto pixels=LivePreviewSize();
+            const auto fb=UI::GetIO()->DisplayFramebufferScale;
+            const auto layout=FitPreview(cursor.x,cursor.y,available.x,available.y,
+                pixels[0]?float(pixels[0]):screen.x*.45f,
+                pixels[1]?float(pixels[1]):screen.y*.84f,fb.x,fb.y);
+            imageSize={layout.width,layout.height};
+            cursor={layout.x,layout.y};
             UI::SetCursorScreenPos(cursor);
             if(auto view=LivePreviewView(); view && previewSettled>=3)
                 UI::ImDrawListManager::AddImage(UI::GetWindowDrawList(),view,cursor,{cursor.x+imageSize.x,cursor.y+imageSize.y},{0,0},{1,1},0xFFFFFFFF);

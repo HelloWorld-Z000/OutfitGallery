@@ -1,11 +1,12 @@
 OutfitGallery 1.0.6 public package (DLL 1.0.6.0)
 Build: PASS using MSVC / CommonLibSSE-NG 4.39.3. Existing C4459 shadowing warning remains.
 CTest: 3/3 PASS (PortraitPngCrop, PresetPersistence, ManagedLedgerIsolation).
-Automated coverage includes crop/preview formats, settings persistence, actor-isolated cleanup bookkeeping, transfer relinquishment, all-or-nothing maintained outfit decoding and load-order remapping, malformed/missing records and bounded conflict retries.
-Gameplay logic is unchanged from user-tested follower4; release metadata, documentation and one unsupported-outfit message were updated. Follower targeting and per-follower maintenance remain opt-in/off by default. Independent preview is a normal optional feature.
+Automated coverage includes native-size preview layout and pixel alignment at 1x/1.25x/2x framebuffer scales, crop/preview formats, settings persistence, actor-isolated cleanup bookkeeping, transfer relinquishment, all-or-nothing maintained outfit decoding and load-order remapping, malformed/missing records and bounded conflict retries.
+Follower gameplay logic is unchanged from user-tested follower4. Preview display now caps enlargement at native resolution and aligns physical pixels. Follower targeting and per-follower maintenance remain opt-in/off by default. Independent preview is a normal optional feature.
 
 USER-REPORTED IN-GAME VALIDATION (development environment, main runtime 1.6.1170):
 - Independent preview improves Community Shaders vignette appearance and saved photos; preview move/layout confirmed.
+- User compared normal and independent previews at full-body and close-up framing after the quality fix; no obvious detail loss reported. Exact pixel equality was not measured.
 - Follower targeting, responsive outfit switching, photography and compact header confirmed.
 - Generated-item reclamation preserves pre-given equipment, including the same wig type.
 - Cleanup survives save, full game exit/restart and subsequent outfit change.
@@ -21,4 +22,4 @@ Other follower frameworks, unusual default outfits, automatic stop after repeate
 DATA:
 Photo/preset/settings library remains external to game saves. Player/follower generated-item identities and opted-in follower/armor maintenance IDs use SKSE co-save records. No full inventory or photo copies stored there. Matching .ess/.skse files should be preserved.
 Runtime/source archives exclude user photos, settings, build outputs and developer diagnostics. Source retains licenses and tests. No commit, push or website upload performed.
-DLL SHA256: 1CFE930EEF3E0456001CE81A5C1E2A70965D61FAB0646A3E6E5523AF285CE8CF
+DLL SHA256: C0F66AD842A1CE1A1D3552328C9680C3CA3968C2AD130A97B7A400821F1748E9

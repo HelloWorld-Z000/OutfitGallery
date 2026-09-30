@@ -1,4 +1,5 @@
 #include "Capture.h"
+#include "PreviewLayout.h"
 #include <d3d11.h>
 #include <wincodec.h>
 #include <wrl/client.h>
@@ -10,6 +11,19 @@ using Microsoft::WRL::ComPtr;
 void Check(HRESULT hr) { if (FAILED(hr)) throw std::runtime_error(std::format("HRESULT 0x{:08X}", static_cast<unsigned>(hr))); }
 int main() {
     try {
+        // A large preview must preserve native resolution and land on physical
+        // pixel boundaries; a small preview must still show the complete crop.
+        for(float scale : {1.f,1.25f,2.f}) {
+            const auto native=Gallery::FitPreview(10.3f,20.7f,1600,1400,1152,1209,scale,scale);
+            auto integral=[](float n){return std::abs(n-std::round(n))<.001f;};
+            if(std::abs(native.width*scale-1152)>.001f || std::abs(native.height*scale-1209)>.001f ||
+                !integral(native.x*scale) || !integral(native.y*scale))
+                throw std::runtime_error("Preview loses native pixel alignment");
+            const auto fitted=Gallery::FitPreview(10.3f,20.7f,320,400,1152,1209,scale,scale);
+            if(fitted.x<10.3f || fitted.y<20.7f || fitted.x+fitted.width>330.301f || fitted.y+fitted.height>420.701f ||
+                std::abs(fitted.width/fitted.height-1152.f/1209.f)>.01f)
+                throw std::runtime_error("Preview crop does not fit a small window");
+        }
         Check(CoInitializeEx(nullptr, COINIT_MULTITHREADED));
         ComPtr<ID3D11Device> device;
         ComPtr<ID3D11DeviceContext> context;

@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 struct ID3D11Texture2D;
 struct ID3D11Device;
 struct ID3D11ShaderResourceView;
@@ -16,5 +17,6 @@ void UpdateLivePreviewTexture(ID3D11Texture2D* frame); // same render-thread ope
 void ResetLivePreview();
 void* LivePreviewView();
 float LivePreviewAspect();
+std::array<unsigned,2> LivePreviewSize();
 }
 
