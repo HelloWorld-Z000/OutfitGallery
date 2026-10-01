@@ -9,8 +9,39 @@
 #include <stdexcept>
 
 namespace Gallery {
+LayoutSurface ReadLayoutSurface() {
+    LayoutSurface result{};
+    auto* window=RE::BSGraphics::Renderer::GetCurrentRenderWindow();
+    if(!window || !window->swapChain) return result;
+    auto* swap=reinterpret_cast<IDXGISwapChain*>(window->swapChain);
+    DXGI_SWAP_CHAIN_DESC desc{};
+    if(FAILED(swap->GetDesc(&desc))) return result;
+    result.swap={float(desc.BufferDesc.Width),float(desc.BufferDesc.Height)};
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> buffer;
+    if(FAILED(swap->GetBuffer(0,IID_PPV_ARGS(&buffer)))) return result;
+    D3D11_TEXTURE2D_DESC texture{}; buffer->GetDesc(&texture);
+    result.buffer={float(texture.Width),float(texture.Height)};
+    Microsoft::WRL::ComPtr<ID3D11Device> device;
+    if(FAILED(swap->GetDevice(IID_PPV_ARGS(&device)))) return result;
+    Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+    device->GetImmediateContext(&context);
+    UINT count=D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
+    D3D11_VIEWPORT views[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE]{};
+    context->RSGetViewports(&count,views);
+    if(count!=1 || views[0].TopLeftX!=0 || views[0].TopLeftY!=0) return result;
+    result.viewport={views[0].Width,views[0].Height};
+    result.valid=true;
+    return result;
+}
+
 namespace {
 std::map<std::string,Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>> portraitViews;
+struct PortraitRetry { std::chrono::steady_clock::time_point next{}; unsigned reports{}; };
+std::map<std::string,PortraitRetry> portraitRetries;
+std::string LogPath(const std::filesystem::path& path) {
+    const auto text=path.generic_u8string();
+    return {reinterpret_cast<const char*>(text.data()),text.size()};
+}
 Microsoft::WRL::ComPtr<ID3D11Texture2D> liveTexture;
 Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> liveView;
 float liveAspect=1.f;
@@ -58,17 +89,45 @@ void CreatePortraitView(ID3D11Device* device,const std::filesystem::path& path,I
 void* LoadPortraitView(const std::string& path) {
     auto found=portraitViews.find(path);
     if(found!=portraitViews.end()) return found->second.Get();
+    auto& retry=portraitRetries[path];
+    const auto now=std::chrono::steady_clock::now();
+    if(now<retry.next) return nullptr;
+    retry.next=now+std::chrono::seconds(2);
+    const bool report=retry.reports<3;
+    if(report) ++retry.reports;
+    std::error_code absoluteError,existsError,sizeError;
+    const auto file=std::filesystem::path(path);
+    const auto absolute=std::filesystem::absolute(file,absoluteError);
+    const bool exists=std::filesystem::exists(file,existsError);
+    const auto bytes=std::filesystem::file_size(file,sizeError);
+    if(report) SKSE::log::info("PHOTO-FIX1 load path={} absolute={} exists={} bytes={} pathError={} existsError={} sizeError={}",
+        path,absoluteError?"unavailable":LogPath(absolute),exists,sizeError?0:bytes,absoluteError.value(),existsError.value(),sizeError.value());
     auto* window=RE::BSGraphics::Renderer::GetCurrentRenderWindow();
-    if(!window || !window->swapChain) return nullptr;
     Microsoft::WRL::ComPtr<ID3D11Device> device;
-    auto* swap=reinterpret_cast<IDXGISwapChain*>(window->swapChain);
-    if(FAILED(swap->GetDevice(IID_PPV_ARGS(&device)))) return nullptr;
+    HRESULT deviceResult=E_POINTER;
+    if(window && window->swapChain) {
+        auto* swap=reinterpret_cast<IDXGISwapChain*>(window->swapChain);
+        deviceResult=swap->GetDevice(IID_PPV_ARGS(&device));
+    }
+    const bool fallback=FAILED(deviceResult) || !device;
+    if(fallback) {
+        device.Reset();
+        // PNG decoding only needs the game's D3D device, not an active render
+        // window. Retain a COM reference for the duration of this operation.
+        device=reinterpret_cast<ID3D11Device*>(RE::BSGraphics::Renderer::GetDevice());
+    }
+    if(report) SKSE::log::info("PHOTO-FIX1 device window={} swap={} swapResult=0x{:08X} fallback={} available={}",
+        window!=nullptr,window && window->swapChain,static_cast<unsigned>(deviceResult),fallback,bool(device));
+    if(!device) return nullptr;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> view;
     try {CreatePortraitView(device.Get(),std::filesystem::path(path),view.GetAddressOf());}
-    catch(const std::exception& e){SKSE::log::warn("{}: {}",path,e.what()); return nullptr;}
+    catch(const std::exception& e){if(report) SKSE::log::warn("PHOTO-FIX1 load failed: {}: {}",path,e.what()); return nullptr;}
+    if(!view) {if(report) SKSE::log::warn("PHOTO-FIX1 empty display view: {}",path);return nullptr;}
+    SKSE::log::info("PHOTO-FIX1 load success: {} fallback={}",path,fallback);
+    portraitRetries.erase(path);
     auto* result=view.Get(); portraitViews.emplace(path,std::move(view)); return result;
 }
-void DisposePortraitView(const std::string& path) {portraitViews.erase(path);}
+void DisposePortraitView(const std::string& path) {portraitViews.erase(path);portraitRetries.erase(path);}
 void ResetLivePreview() { liveView.Reset(); liveTexture.Reset(); }
 void* LivePreviewView() { return liveView.Get(); }
 float LivePreviewAspect() { return liveAspect; }
@@ -134,7 +193,13 @@ std::filesystem::path CapturePortrait(bool centered) {
     D3D11_TEXTURE2D_DESC captureDesc{};
     frame->GetDesc(&captureDesc);
     SKSE::log::info("Portrait capture: framework pre-render, {}x{}, DXGI format {}, samples {}",captureDesc.Width,captureDesc.Height,static_cast<unsigned>(captureDesc.Format),captureDesc.SampleDesc.Count);
-    return SavePortraitTexture(frame.Get(), "Data/SKSE/Plugins/OutfitGallery/Captures",1024,centered);
+    const auto path=SavePortraitTexture(frame.Get(), "Data/SKSE/Plugins/OutfitGallery/Captures",1024,centered);
+    std::error_code pathError,sizeError;
+    const auto absolute=std::filesystem::absolute(path,pathError);
+    const auto bytes=std::filesystem::file_size(path,sizeError);
+    SKSE::log::info("PHOTO-FIX1 saved path={} absolute={} bytes={} pathError={} sizeError={}",
+        LogPath(path),pathError?"unavailable":LogPath(absolute),sizeError?0:bytes,pathError.value(),sizeError.value());
+    return path;
 }
 std::filesystem::path SavePortraitTexture(ID3D11Texture2D* frame, const std::filesystem::path& folder, unsigned maxWidth, bool centered) {
     using Microsoft::WRL::ComPtr;

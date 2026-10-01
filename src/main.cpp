@@ -1,4 +1,7 @@
 #include "Capture.h"
+#include "ExternalTranslation.h"
+#include "TranslationKeys.h"
+#include <fstream>
 #include "PreviewLayout.h"
 #include "Presets.h"
 #include "ManagedItems.h"
@@ -17,7 +20,7 @@
 
 using namespace REL::literals;
 SKSEPluginInfo(
-    .Version = "1.0.8.0"_v,
+    .Version = "1.0.9.0"_v,
     .Name = "OutfitGallery",
     .Author = "Outfit Gallery contributors",
     // SKSE's final component is the store identifier: GOG is 1, not 0.
@@ -41,7 +44,7 @@ const StudioSettings initialCamera{};
 std::string startupTab=initialCamera.startupTab;
 std::atomic<float> distance{initialCamera.distance}, height{initialCamera.height}, orbit{initialCamera.orbit}, pitch{initialCamera.pitch}, fov{initialCamera.fov}, lateral{initialCamera.lateral}, elevation{initialCamera.elevation};
 bool showNames=true, showCounts=true;
-bool addMissing{}, showCameraSettings{};
+bool addMissing{true}, showCameraSettings{};
 std::atomic<bool> detachedPreview{}, cameraCentered{}, followerTargeting{};
 RE::ActorHandle studioActor, verificationActor; // game-thread only, never raw retained pointers
 std::atomic<bool> followerMaintained{};
@@ -498,11 +501,31 @@ void __stdcall RenderStudio() {
     if(openedSerial!=studioOpenSerial.load()) {openedSerial=studioOpenSerial.load(); showCameraSettings=false;}
 
 
-    const auto screen = UI::GetIO()->DisplaySize;
+    const auto display = UI::GetIO()->DisplaySize;
+    const auto framebuffer = UI::GetIO()->DisplayFramebufferScale;
+    const auto surface = ReadLayoutSurface();
+    const auto layout = ResolveLayoutSize({display.x,display.y},{framebuffer.x,framebuffer.y},surface);
+    const UI::ImVec2 screen{layout.width,layout.height};
+    // Do not mutate shared ImGui IO, font scale, draw data or mouse coordinates.
+    static unsigned diagnosticSerial{}, diagnosticSample{};
+    static ULONGLONG diagnosticDue{};
+    if(diagnosticSerial!=studioOpenSerial.load()) {
+        diagnosticSerial=studioOpenSerial.load(); diagnosticSample=0; diagnosticDue=0;
+    }
+    const bool diagnosticNow=diagnosticSample<3 && GetTickCount64()>=diagnosticDue;
     UI::SetNextWindowPos({screen.x*0.01f, screen.y*0.015f}, UI::ImGuiCond_Always);
     UI::SetNextWindowSize({screen.x*0.515f, screen.y*0.97f}, UI::ImGuiCond_Always);
     bool opened = true;
     if (UI::Begin("Outfit Gallery", &opened, UI::ImGuiWindowFlags_NoResize | UI::ImGuiWindowFlags_NoMove | UI::ImGuiWindowFlags_NoCollapse | UI::ImGuiWindowFlags_NoNavInputs)) {
+        if(diagnosticNow) {
+            ++diagnosticSample; diagnosticDue=GetTickCount64()+1500;
+            const auto size=UI::GetWindowSize(), pos=UI::GetWindowPos();
+            SKSE::log::info("SCALE-FIX1 open={} sample={} display={}x{} framebuffer={}x{} swap={}x{} buffer={}x{} viewport={}x{} valid={} layout={}x{} corrected={} actualWindow={}x{} position={},{} font={} detached={}",
+                diagnosticSerial,diagnosticSample,display.x,display.y,framebuffer.x,framebuffer.y,
+                surface.swap.width,surface.swap.height,surface.buffer.width,surface.buffer.height,
+                surface.viewport.width,surface.viewport.height,surface.valid,screen.x,screen.y,
+                screen.x!=display.x || screen.y!=display.y,size.x,size.y,pos.x,pos.y,UI::GetFontSize(),detachedPreview.load());
+        }
         if(studioFollower) {
             std::string targetName; {std::scoped_lock lock(statusMutex); targetName=studioActorName;}
             UI::Text(Tr("Follower: %s"),targetName.c_str());
@@ -717,6 +740,7 @@ void Message(SKSE::MessagingInterface::Message* message) {
         (void)SmoothCamAPI::RequestInterface(SKSE::GetMessagingInterface());
         break;
     case SKSE::MessagingInterface::kDataLoaded: {
+        LoadExternalTranslation();
         RegisterManagedItemEvents();
         if (!GetMenuFrameworkModule() || !GetProcAddress(GetMenuFrameworkModule(), "RegisterEventPriority") || !GetProcAddress(GetMenuFrameworkModule(), "RegisterInpoutEvent")) {
             SetStatus("A compatible SKSE Menu Framework is required."); break;
@@ -778,7 +802,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
         SKSE::log::error("Unsupported Skyrim runtime {}. Supported targets: 1.5.97, 1.6.353, 1.6.640, 1.6.1130, 1.6.1170, GOG 1.6.1179, Steam 1.7.104. VR is not enabled.",runtime.string());
         return false;
     }
-    SKSE::log::info("Runtime {} accepted; 1.0.8 runtime target; Steam 1.7.104 user-tested; GOG 1.6.1179 untested.",runtime.string());
+    SKSE::log::info("Runtime {} accepted; 1.0.9 runtime target; Steam 1.7.104 user-tested; GOG 1.6.1179 untested.",runtime.string());
     SKSE::Init(skse, false);
     Gallery::InitializeManagedItems();
     const auto ini = std::filesystem::absolute("Data/SKSE/Plugins/OutfitGallery.ini");
@@ -786,7 +810,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
     Gallery::saveHotkey = GetPrivateProfileIntW(L"Input", L"SaveHotkey", 67, ini.c_str());
     Gallery::captureKeys[0]=Gallery::saveHotkey;
     Gallery::gamepadHotkey = GetPrivateProfileIntW(L"Input", L"GamepadHotkey", 32, ini.c_str());
-    SKSE::log::info("OutfitGallery 1.0.8 (CommonLib 10.1.0); runtime {}; key={}", runtime.string(), Gallery::hotkey.load());
+    SKSE::log::info("OutfitGallery 1.0.9 (CommonLib 10.1.0); runtime {}; key={}", runtime.string(), Gallery::hotkey.load());
     return SKSE::GetMessagingInterface()->RegisterListener(Gallery::Message);
 }
 

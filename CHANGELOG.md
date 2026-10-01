@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.9 - Photo loading, display scaling and external translations
+
+- Fix Missing photo when swap-chain device retrieval fails, using the renderer device as a fallback. Existing and newly saved photos were verified by an affected Steam 1.5.97 user.
+- Retry failed photo loads with a short delay and log bounded diagnostic details.
+
+- Integrate the user-verified DLSS layout correction from scale-fix1.
+- Load an optional UTF-8 Translation.json at startup; retain built-in English and Japanese.
+- Validate translation format tokens and fall back to English for missing or invalid entries. Include an English template and translation instructions.
+
+- Enable Add missing base items by default for new settings or settings without this field. Preserve saved ON/OFF preferences.
+
 ## 1.0.8 - GOG loader fix and gallery layout improvements
 
 - Fix the GOG 1.6.1179 SKSE compatibility identifier (store sub-version 1). GOG in-game verification is still pending.

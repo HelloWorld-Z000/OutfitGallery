@@ -1,9 +1,14 @@
-OutfitGallery 1.0.8 final (integrated grid fix)
-Base: public 1.0.7. No transmog or upscaler correction included.
-GOG metadata: 0x010649B1; runtime guard shares the same compatibility list. Six Steam identifiers retained.
-Compact tabs (105 -> 60 minimum; actual icon widths used for overflow): user-confirmed.
-Photo list always reserves vertical scrollbar width, preventing thumbnail size oscillation: user-confirmed with grid-fix1.
-Final code differs from the tested grid-fix1 only in startup label; documentation updated.
-GOG in-game verification remains pending. Prior Steam 1.7.104 verification was on the runtime compatibility build.
-Build, metadata and CTest results are verified during packaging.
-Final build succeeded. CTest 3/3 passed. Exported runtime metadata verified.
+OutfitGallery 1.0.9 validation
+Build: MSVC 19.44, CommonLibSSE-NG 10.1.0, RelWithDebInfo.
+PASS 5/5: ExternalTranslationValidation, UpscalerLayoutPolicy, PortraitPngCrop,
+PresetPersistence, ManagedLedgerIsolation.
+PASS exported 1.0.9 metadata and all seven exact runtime compatibility entries.
+Capture.cpp combines tested photo-fix1 and unchanged scale-fix1 layout helper.
+Photo fix: affected Steam 1.5.97 user verified existing and new photos. Log shows
+renderer-device fallback after swap GetDevice returned 0x80004002.
+Source log: https://pastebin.com/6nNf9hZ9
+Scale fix: PureDark Build 18 DLSS user confirmed corrected layout (FG off).
+External Japanese test translations and English fallback verified by the author.
+Default Add missing base items ON; explicit saved preferences preserved.
+Final combined DLL not yet smoke-tested in game. GOG/other upscalers unverified.
+No transmog prototype included. Photo/preset formats unchanged.

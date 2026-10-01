@@ -44,7 +44,7 @@ void WriteInputSettings(const InputSettings& s,const std::filesystem::path& path
 void ValidateSettings(const StudioSettings& s) {
     if(s.startupTab.size()>240) throw std::runtime_error("Invalid startup tab");
     if(s.headSlots & ~0x1803u) throw std::runtime_error("Invalid head slots");
-    if(s.language<0 || s.language>1) throw std::runtime_error("Invalid language");
+    if(s.language<0 || s.language>2) throw std::runtime_error("Invalid language");
     auto valid=[](float v,float low,float high){return std::isfinite(v) && v>=low && v<=high;};
     for(auto v:s.previewRect) if(!valid(v,0.f,1.f)) throw std::runtime_error("Invalid preview rectangle");
     if(s.previewRect[2]<.1f || s.previewRect[3]<.1f) throw std::runtime_error("Preview rectangle too small");
@@ -56,7 +56,7 @@ StudioSettings ReadStudioSettings(const std::filesystem::path& path) {
     std::ifstream in(path); Json j; in>>j;
     if(j.at("schema").get<int>()!=1) throw std::runtime_error("Unsupported settings schema");
     StudioSettings s{j.at("distance"),j.at("height"),j.at("orbit"),j.at("pitch"),j.at("fov"),j.value("columns",3)};
-    s.showNames=j.value("showNames",true); s.showCounts=j.value("showCounts",true); s.language=j.value("language",0); s.allowFreeCamera=j.value("allowFreeCamera",false); s.addMissing=j.value("addMissing",false);
+    s.showNames=j.value("showNames",true); s.showCounts=j.value("showCounts",true); s.language=j.value("language",0); s.allowFreeCamera=j.value("allowFreeCamera",false); s.addMissing=j.value("addMissing",true);
     s.headSlots=j.value("headSlots",0x1803u);
     s.startupTab=j.value("startupTab",std::string{});
     s.followerTargeting=j.value("followerTargeting",false);

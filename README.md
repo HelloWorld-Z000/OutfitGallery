@@ -1,6 +1,6 @@
 # Outfit Gallery — Visual Outfit Manager
 
-**Version 1.0.8** · English / 日本語 · Native SKSE plugin
+**Version 1.0.9** · English / 日本語 · Native SKSE plugin
 
 Build a visual wardrobe: photograph equipped outfits, browse your collection, and change clothes by selecting a picture. Includes an optional independent preview window and experimental follower support. Weapons and ammunition are kept.
 
@@ -119,7 +119,7 @@ In the right camera frame: **left drag** pans, **right drag** orbits/tilts, and 
 
 Presets record **base item identities** (source plugin and local FormID). Tempering, custom enchantments/names, poisons, spells and shouts are not restored. Original item plugins must be installed with unchanged identities. Changed slot assignments can prevent partial application. When applying a valid partial preset, conflicting worn armor is replaced as a whole, even if it occupies multiple slots; unrelated armor is kept.
 
-Enable **Add missing base items** to restore items you do not own, including on a new character. Newly created items are tracked conservatively and reclaimed after they are unequipped by a verified gallery change. Existing owned items are retained. Ambiguous, transferred, customized or previously untracked items may remain. Ownership tracking belongs to the character's SKSE co-save; retain matching `.ess` and `.skse` files. Permanent deletion from Trash removes the photo/preset, not inventory items.
+**Add missing base items** restores items you do not own, including on a new character. It is enabled by default; previously saved ON/OFF preferences are preserved. Newly created items are tracked conservatively and reclaimed after they are unequipped by a verified gallery change. Existing owned items are retained. Ambiguous, transferred, customized or previously untracked items may remain. Ownership tracking belongs to the character's SKSE co-save; retain matching `.ess` and `.skse` files. Permanent deletion from Trash removes the photo/preset, not inventory items.
 
 ## Troubleshooting
 
@@ -138,3 +138,9 @@ Partial changes prioritize the selected preset. Any worn armor sharing its slots
 
 Version 1.0.8 corrects the GOG loader identifier, compacts category tabs, and prevents thumbnail size flickering by keeping vertical scrollbar space reserved in the photo list. The author confirmed the revised tab appearance, controls and thumbnail flicker fix in game. GOG in-game verification is still pending.
 This is the complete main package; no compatibility patch is required. Disable runtime/transmog trial overrides so this DLL wins. Preserve your photo/preset/settings folder and customized INI when updating. No data or co-save format migration is introduced. The experimental transmog feature is not included.
+
+
+## 1.0.9
+Includes the verified scale-fix1 layout correction and optional external translations. See translations/README.md and Translation.template.json. Select External (Translation.json) after installing your translation and restarting Skyrim. Built-in English/Japanese remain available. New settings default Add missing base items to ON; existing saved preferences are preserved. External Japanese test translations were verified in game by the author. The final combined build has passed automated tests; an in-game smoke test is still recommended.
+
+1.0.9 also includes the user-verified photo-fix1 renderer-device fallback for Missing photo. Existing and new photos worked in the affected user's test. Photo files and preset formats are unchanged.

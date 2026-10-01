@@ -1,5 +1,22 @@
 // UI translation only: stable ### IDs keep focus and open menus intact.
-int language=0; // 0 English, 1 Japanese
+int language=0; // 0 English, 1 Japanese, 2 external Translation.json
+Translation::Pack externalTranslation;
+void LoadExternalTranslation() {
+    const std::filesystem::path path="Data/SKSE/Plugins/OutfitGallery/Translation.json";
+    try {
+        if(!std::filesystem::exists(path)) return;
+        if(std::filesystem::file_size(path)>4*1024*1024) throw std::runtime_error("Translation file exceeds 4 MiB");
+        std::ifstream file(path,std::ios::binary);
+        if(!file) throw std::runtime_error("Cannot open translation file");
+        std::string bytes((std::istreambuf_iterator<char>(file)),{});
+        if(file.bad()) throw std::runtime_error("Cannot read translation file");
+        externalTranslation=Translation::Parse(bytes,Translation::Keys());
+        SKSE::log::info("Translation.json: loaded {} entries; rejected {}; missing/rejected entries use English",externalTranslation.strings.size(),externalTranslation.rejected);
+    } catch(const std::exception& e) {
+        externalTranslation={};
+        SKSE::log::warn("Translation.json: {}; using English for external language",e.what());
+    }
+}
 const std::map<std::string,std::string> japanese{
  {"Maintain this follower's outfit","この服装を維持"},
  {"Restore standard outfit","標準装備に戻す"},
@@ -98,6 +115,7 @@ const std::map<std::string,std::string> japanese{
  {"Details: Documents/My Games/Skyrim Special Edition/SKSE/OutfitGallery.log","詳細ログ：Documents/My Games/Skyrim Special Edition/SKSE/OutfitGallery.log"}
 };
 const char* Tr(const char* key) {
+    if(language==2) {auto it=externalTranslation.strings.find(key); if(it!=externalTranslation.strings.end()) return it->second.c_str();}
     if(language==1) {auto it=japanese.find(key); if(it!=japanese.end()) return it->second.c_str();}
     return key;
 }
@@ -115,6 +133,15 @@ std::string CategoryTitle(const Category& c) {
     return c.name;
 }
 std::string StatusText(const std::string& text) {
+    if(language==2) {
+        if(externalTranslation.strings.contains(text)) return externalTranslation.strings.at(text);
+        const char* prefixes[]{"Item uses unselected slots: ","Camera preset saved: ","Empty camera slot: ","Photo + outfit saved: ","Outfit restored: ","Equipment differs after apply: ","Missing or changed mod item: ","Equip requests sent: ","Cannot open studio: ","Not owned: "};
+        for(auto* prefix:prefixes) if(text.starts_with(prefix)) {
+            const auto remainder=text.substr(std::char_traits<char>::length(prefix));
+            return std::string(Tr(prefix))+Tr(remainder.c_str());
+        }
+        return text;
+    }
     if(language!=1) return text;
     if(japanese.contains(text)) return japanese.at(text);
     if(text.starts_with("Cannot open studio: ")) return std::string("画面を開けません：")+Tr(text.substr(20).c_str());

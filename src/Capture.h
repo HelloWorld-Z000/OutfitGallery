@@ -1,9 +1,11 @@
 #pragma once
 #include <array>
+#include "ScaleLayout.h"
 struct ID3D11Texture2D;
 struct ID3D11Device;
 struct ID3D11ShaderResourceView;
 namespace Gallery {
+LayoutSurface ReadLayoutSurface(); // Render-thread, read-only; no GPU copy/readback.
 // Display-referred PNG values are passed unchanged to the ImGui shader.
 void CreatePortraitView(ID3D11Device* device, const std::filesystem::path& path, ID3D11ShaderResourceView** view);
 void* LoadPortraitView(const std::string& path);

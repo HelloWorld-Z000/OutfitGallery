@@ -34,9 +34,10 @@ void RenderBrowser(bool& addMissing) {
     }
     bool openEdit=false, openTab=false;
     if(UI::CollapsingHeader(Label("Options"))) {
-        if(UI::BeginCombo("Language / 言語",language==1?"日本語":"English")) {
+        if(UI::BeginCombo("Language / 言語",language==2?"External (Translation.json)":language==1?"日本語":"English")) {
             if(UI::Selectable("日本語",language==1)) {language=1; settingsChangedAt=GetTickCount64();}
             if(UI::Selectable("English",language==0)) {language=0; settingsChangedAt=GetTickCount64();}
+            if(UI::Selectable("External (Translation.json)",language==2)) {language=2; settingsChangedAt=GetTickCount64();}
             UI::EndCombo();
         }
         RenderHotkeys();
@@ -338,7 +339,7 @@ void RenderBrowser(bool& addMissing) {
         // The overlaid trash X must be able to receive hover/clicks instead of
         // the full-size image button claiming that area first.
         if(category=="#trash") UI::SetNextItemAllowOverlap();
-        const bool clicked=texture?UI::ImageButton(p.photo.c_str(),texture,{w,h}):UI::Button(("Missing photo##"+p.photo).c_str(),{w,h});
+        const bool clicked=texture?UI::ImageButton(p.photo.c_str(),texture,{w,h}):UI::Button((std::string(Tr("Missing photo"))+"##"+p.photo).c_str(),{w,h});
         if(p.photo==selected && !tabsFocused) UI::PopStyleColor();
         const bool hover=UI::IsItemHovered();
         const auto photoMin=UI::GetItemRectMin(), photoMax=UI::GetItemRectMax();

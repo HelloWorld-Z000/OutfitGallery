@@ -136,6 +136,8 @@ int main() {
         if(ReadStudioSettings(folder/"settings.json").language!=0) throw std::runtime_error("English preference lost");
         settings.language=1; WriteStudioSettings(settings,folder/"settings.json");
         if(ReadStudioSettings(folder/"settings.json").language!=1) throw std::runtime_error("Japanese preference lost");
+        settings.language=2; WriteStudioSettings(settings,folder/"settings.json");
+        if(ReadStudioSettings(folder/"settings.json").language!=2) throw std::runtime_error("External language preference lost");
         settings.allowFreeCamera=true; WriteStudioSettings(settings,folder/"settings.json");
         if(!ReadStudioSettings(folder/"settings.json").allowFreeCamera) throw std::runtime_error("free camera preference lost");
         settings.addMissing=true; WriteStudioSettings(settings,folder/"settings.json");
@@ -143,7 +145,7 @@ int main() {
         settings.addMissing=false; WriteStudioSettings(settings,folder/"settings.json");
         if(ReadStudioSettings(folder/"settings.json").addMissing) throw std::runtime_error("add missing disabled preference lost");
         {std::ofstream out(folder/"legacy-settings.json"); out << R"({"schema":1,"distance":220,"height":65,"orbit":0,"pitch":0,"fov":60})";}
-        if(ReadStudioSettings(folder/"legacy-settings.json").addMissing) throw std::runtime_error("legacy settings unexpectedly enable item creation");
+        if(!ReadStudioSettings(folder/"legacy-settings.json").addMissing) throw std::runtime_error("missing addMissing setting should default to enabled");
         CameraBank bank{}; bank[0]=settings; bank[6]=settings; bank[6]->height=140;
         settings.lateral=42; settings.elevation=-35;
         WriteStudioSettings(settings,folder/"settings.json");
