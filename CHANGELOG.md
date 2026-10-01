@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.8 - GOG loader fix and gallery layout improvements
+
+- Fix the GOG 1.6.1179 SKSE compatibility identifier (store sub-version 1). GOG in-game verification is still pending.
+- Reduce the minimum text-tab width from 105 to 60; longer labels still expand to fit.
+- Calculate horizontal scrolling from the actual text-tab, icon and column-button widths.
+- Fix thumbnail size flickering near the scrolling threshold by always reserving vertical scrollbar space in the photo list. Confirmed in game by the author.
+- No preset format or equipment behavior changes.
+
 ## 1.0.7 - Steam 1.7.104 and GOG runtime compatibility
 
 - Add Steam 1.7.104 (SKSE 2.3.1), user-tested with the compatibility build.

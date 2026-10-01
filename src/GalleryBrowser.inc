@@ -135,20 +135,24 @@ void RenderBrowser(bool& addMissing) {
     }
     const auto* style=UI::GetStyle();
     const float tabHeight=UI::GetTextLineHeightWithSpacing();
-    float tabTotal=70.f;
-    for(const auto& c:tabs) tabTotal+=std::max(105.f,UI::CalcTextSize(CategoryTitle(c).c_str()).x+style->FramePadding.x*2)+style->ItemSpacing.x;
+    const auto categoryWidth=[&](const auto& c) {
+        const bool icon=c.id=="#trash" || c.id=="#head" || c.id=="#accessories";
+        return icon ? tabHeight+20.f : std::max(60.f,UI::CalcTextSize(CategoryTitle(c).c_str()).x+style->FramePadding.x*2);
+    };
+    float tabTotal=tabHeight+20.f; // Column button, plus one gap per category.
+    for(const auto& c:tabs) tabTotal+=categoryWidth(c)+style->ItemSpacing.x;
     const bool tabOverflow=tabTotal>UI::GetContentRegionAvail().x-style->WindowPadding.x*2;
     const float stripHeight=tabHeight+style->WindowPadding.y*2+(tabOverflow?style->ScrollbarSize:0);
     UI::BeginChild("Categories",{0,stripHeight},0,UI::ImGuiWindowFlags_HorizontalScrollbar|UI::ImGuiWindowFlags_NoNavInputs);
     for(std::size_t n=0;n<tabs.size();++n) {
         if(n) UI::SameLine();
         const auto& c=tabs[n];
-        const float tabWidth=std::max(105.f,UI::CalcTextSize(CategoryTitle(c).c_str()).x+style->FramePadding.x*2);
+        const float tabWidth=categoryWidth(c);
         const bool icon=c.id=="#trash" || c.id=="#head" || c.id=="#accessories";
         UI::PushStyleColor(UI::ImGuiCol_Header,{.42f,.29f,.07f,1.f});
         UI::PushStyleColor(UI::ImGuiCol_HeaderHovered,{.55f,.38f,.10f,1.f});
         UI::PushStyleColor(UI::ImGuiCol_HeaderActive,{.65f,.46f,.12f,1.f});
-        if(UI::Selectable((icon?"##icon"+c.id:CategoryTitle(c)+"##tab"+c.id).c_str(),category==c.id,0,{icon?tabHeight+20.f:tabWidth,tabHeight})) {category=c.id; tabsFocused=true; columnsFocused=false; tabChanged=true;}
+        if(UI::Selectable((icon?"##icon"+c.id:CategoryTitle(c)+"##tab"+c.id).c_str(),category==c.id,0,{tabWidth,tabHeight})) {category=c.id; tabsFocused=true; columnsFocused=false; tabChanged=true;}
         UI::PopStyleColor(3);
         if(category==c.id) {
             const auto a=UI::GetItemRectMin(), b=UI::GetItemRectMax(); auto* draw=UI::GetWindowDrawList();
@@ -300,7 +304,10 @@ void RenderBrowser(bool& addMissing) {
     }
     const auto screen=UI::GetIO()->DisplaySize;
     const float footer=UI::GetTextLineHeightWithSpacing()*1.4f;
-    UI::BeginChild("Presets",{0,std::max(80.f,UI::GetContentRegionAvail().y-footer)},0,UI::ImGuiWindowFlags_NoNavInputs);
+    // Reserve scrollbar width even when all rows fit. Otherwise its appearance
+    // narrows the thumbnails, making them shorter and hiding it again next frame.
+    UI::BeginChild("Presets",{0,std::max(80.f,UI::GetContentRegionAvail().y-footer)},0,
+        UI::ImGuiWindowFlags_NoNavInputs|UI::ImGuiWindowFlags_AlwaysVerticalScrollbar);
     const float stepX=(UI::GetContentRegionAvail().x-16.f)/gridColumns;
     const float w=std::max(32.f,stepX-12.f), h=w*(screen.y*.84f)/(screen.x*.45f);
     const float textHeight=UI::GetTextLineHeightWithSpacing();

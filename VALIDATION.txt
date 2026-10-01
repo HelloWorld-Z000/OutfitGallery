@@ -1,12 +1,9 @@
-OutfitGallery 1.0.7
-Base: public 1.0.6 plus runtime1 compatibility changes. No transmog.
-CommonLibSSE-NG: official v10.1.0, compiled from source using MSVC 19.44.
-Steam 1.7.104: user reported successful in-game testing of runtime1.
-User also reported standalone runtime1 working in their main environment.
-The reported reopen failure was traced by the user to a vanilla B-button menu binding conflict; no speculative camera/pause fix was applied.
-GOG 1.6.1179: accepted runtime, not tested in game.
-Old runtime support retained; not every old runtime was retested with the rebuilt library.
-The 1.0.7 final build changes version/log messages and packaging, not gameplay logic, relative to the tested runtime1 DLL.
-Automated checks are recorded in the release SHA256/build report; they do not simulate the Skyrim runtime.
-
-Final build: succeeded. CTest 3/3 passed: PortraitPngCrop, PresetPersistence, ManagedLedgerIsolation.
+OutfitGallery 1.0.8 final (integrated grid fix)
+Base: public 1.0.7. No transmog or upscaler correction included.
+GOG metadata: 0x010649B1; runtime guard shares the same compatibility list. Six Steam identifiers retained.
+Compact tabs (105 -> 60 minimum; actual icon widths used for overflow): user-confirmed.
+Photo list always reserves vertical scrollbar width, preventing thumbnail size oscillation: user-confirmed with grid-fix1.
+Final code differs from the tested grid-fix1 only in startup label; documentation updated.
+GOG in-game verification remains pending. Prior Steam 1.7.104 verification was on the runtime compatibility build.
+Build, metadata and CTest results are verified during packaging.
+Final build succeeded. CTest 3/3 passed. Exported runtime metadata verified.
