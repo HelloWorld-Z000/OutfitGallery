@@ -15,7 +15,11 @@ void RenderBrowser(bool& addMissing) {
     static std::string category, selected, contextPhoto, editCategory;
     static bool newCategory{};
     static std::vector<std::string> deletePhotos;
-    bool openDelete=false;
+    bool openDelete=false, openScope=false;
+    static Preset scopeEditing;
+    static std::uint32_t scopeDraft{};
+    static bool scopeDraftInitialized{};
+
     static std::vector<std::string> loaded;
     static std::string oldFilter;
     static bool tabsFocused{}, columnsFocused{};
@@ -98,7 +102,10 @@ void RenderBrowser(bool& addMissing) {
         }
         UI::EndDisabled();
         if(UI::Checkbox(Label("Add missing base items (new game)"),&addMissing)) { SaveSettingsIfDue(true); }
-        UI::TextWrapped(Tr("Base items only. Upgrades, custom enchantments and spells are not saved."));
+        UI::TextWrapped("%s",Tr("Generated items use base properties; custom enchantments are not recreated."));
+        bool prefer=preferEnchanted.load();
+        if(UI::Checkbox(Label("Prefer registered enchanted items"),&prefer)) {preferEnchanted=prefer; SaveSettingsIfDue(true);}
+        UI::TextWrapped("%s",Tr("Player only. Uses owned registered enchanted items; otherwise uses normal equipment and notifies you. Applies on the next outfit change. Re-register older sets to record enchantments."));
     }
     UI::InputText(Label("Search outfits"),search,sizeof(search));
 
@@ -280,7 +287,9 @@ void RenderBrowser(bool& addMissing) {
     if(!cards.empty()) selected=cards[index].photo;
     auto queueApply=[&](const Preset& p){
         if(saveBusy || category=="#trash") return;
-        std::scoped_lock lock(presetsMutex); requestedPreset=p; requestedAddMissing=addMissing; command=4;
+        std::scoped_lock lock(presetsMutex); requestedPreset=p;
+        {const auto label=library.labels.find(p.photo); if(label!=library.labels.end()) requestedPreset.exchangeSlots=label->second.exchangeSlots;}
+        requestedAddMissing=addMissing; command=4;
     };
     if(browse && !cards.empty() && !tabsFocused && !enteredPhotos) {
         if(PadPressed(UI::ImGuiKey_GamepadFaceDown,false)) queueApply(cards[index]);
@@ -349,6 +358,21 @@ void RenderBrowser(bool& addMissing) {
             UI::ImDrawListManager::AddRect(draw,{photoMin.x+3,photoMin.y+3},{photoMax.x-3,photoMax.y-3},0xFF70C6E8,0,0,4.f);
         }
         const auto label=library.labels.find(p.photo);
+        // A full outfit override changes full replacement into selected-slot
+        // replacement even when all saved slots are selected. For partial
+        // outfits an explicit selection equal to the original is unchanged.
+        const bool editedScope=label!=library.labels.end() && label->second.exchangeSlots.has_value() &&
+            (!p.slotMask || *label->second.exchangeSlots!=p.slotMask);
+        if(editedScope) {
+            auto* draw=UI::GetWindowDrawList();
+            const float radius=std::clamp(w*.024f,3.5f,5.5f);
+            // ImageButton's item rectangle includes frame padding. Anchor to
+            // the actual image so the halo stays fully inside the photograph.
+            const auto padding=UI::GetStyle()->FramePadding;
+            const UI::ImVec2 center{photoMin.x+padding.x+radius+3.f,photoMin.y+padding.y+radius+3.f};
+            UI::ImDrawListManager::AddCircleFilled(draw,center,radius+1.5f,0xD0202020,16);
+            UI::ImDrawListManager::AddCircleFilled(draw,center,radius,0xFFEBDD9A,16);
+        }
         if(!p.slotMask && label!=library.labels.end() && std::find(label->second.categories.begin(),label->second.categories.end(),"favorites")!=label->second.categories.end()) {
             auto* draw=UI::GetWindowDrawList();
             const float radius=std::clamp(w*.055f,8.f,15.f);
@@ -358,16 +382,17 @@ void RenderBrowser(bool& addMissing) {
             for(int k=0;k<10;++k) {const float angle=-std::numbers::pi_v<float>/2+k*std::numbers::pi_v<float>/5; const float r=k%2?radius*.43f:radius; points[k]={center.x+std::cos(angle)*r,center.y+std::sin(angle)*r};}
             for(int k=0;k<10;++k) UI::ImDrawListManager::AddLine(draw,points[k],points[(k+1)%10],0xFF55DFFF,2.f);
         }
-        if(hover) {
-            std::string scope;
-            if(p.slotMask) for(unsigned bit=0;bit<32;++bit) if(p.slotMask&(1u<<bit)) scope+=" "+std::to_string(bit+30);
-            UI::SetTooltip("%s (%u)\n%s%s",p.name.c_str(),static_cast<unsigned>(p.items.size()),Tr(p.slotMask?"Selected slots:":"Full outfit"),scope.c_str());
-        }
+        if(hover) UI::SetTooltip("%s",p.name.c_str());
         if(UI::IsItemClicked(1)) {contextPhoto=p.photo; strcpy_s(editName,p.name.c_str()); openEdit=true; selected=p.photo;}
         // Gamepad A is handled once above; avoid native-nav activation applying another card.
         if(clicked && !UI::GetDragDropPayload() && !PadPressed(UI::ImGuiKey_GamepadFaceDown,false)) {selected=p.photo; tabsFocused=false; columnsFocused=false; queueApply(p);}
         UI::PushStyleColor(UI::ImGuiCol_PopupBg,{.07f,.07f,.07f,1.f});
-        if(libraryWritable && UI::BeginDragDropSource()) {
+        // Only photo dragging gets extra tolerance; do not modify ImGui's global
+        // threshold. A slight movement still releases as a normal ImageButton click.
+        // IsMouseDragging uses the maximum distance since mouse-down, retaining
+        // the drag once started even when the cursor moves back toward its origin.
+        const float photoDragThreshold=std::max(36.f,UI::GetIO()->MouseDragThreshold);
+        if(libraryWritable && UI::IsMouseDragging(0,photoDragThreshold) && UI::BeginDragDropSource()) {
             UI::SetDragDropPayload("OUTFIT_PHOTO",p.photo.c_str(),p.photo.size()+1);
             UI::TextUnformatted(p.name.c_str());
             if(texture) UI::Image(texture,{w*.5f,h*.5f});
@@ -462,6 +487,16 @@ void RenderBrowser(bool& addMissing) {
         }
         bool partialContext=false;
         {std::scoped_lock lock(presetsMutex); for(const auto& p:presets) if(p.photo==contextPhoto) partialContext=p.slotMask!=0;}
+        if(UI::Button(Label("Exchange slots"))) {
+            {std::scoped_lock lock(presetsMutex);
+                for(const auto& p:presets) if(p.photo==contextPhoto) {scopeEditing=p; break;}
+                scopeRequest=scopeEditing; scopeReady=false; scopeMasks.clear(); scopeError.clear();
+            }
+            const auto label=library.labels.find(contextPhoto);
+            scopeDraftInitialized=label!=library.labels.end() && label->second.exchangeSlots.has_value();
+            scopeDraft=scopeDraftInitialized ? *label->second.exchangeSlots : 0;
+            command=10; openScope=true; UI::CloseCurrentPopup();
+        }
         if(!partialContext) UI::TextUnformatted(Tr("Categories (multiple allowed)"));
         if(!partialContext) for(const auto& c:library.categories) {
             const auto found=library.labels.find(contextPhoto);
@@ -476,6 +511,48 @@ void RenderBrowser(bool& addMissing) {
         const bool deleted=found!=library.labels.end()&&found->second.deleted;
         if(UI::Button(Label(deleted?"Restore from Trash":"Move to Trash"))) {auto next=library; next.labels[contextPhoto].deleted=!deleted; if(CommitLibrary(std::move(next))) UI::CloseCurrentPopup();}
         if(UI::Button(Label("Close"))) UI::CloseCurrentPopup();
+        UI::EndPopup();
+    }
+    if(openScope) UI::OpenPopup(Label("Exchange slots"));
+    if(UI::BeginPopupModal(Label("Exchange slots"),nullptr,UI::ImGuiWindowFlags_AlwaysAutoResize)) {
+        UI::TextUnformatted(scopeEditing.name.c_str());
+        bool readyScope; std::vector<std::uint32_t> masks; std::string error;
+        {std::scoped_lock lock(presetsMutex); readyScope=scopeReady; masks=scopeMasks; error=scopeError;}
+        if(!readyScope) UI::TextUnformatted(Tr("Loading equipment slots..."));
+        else if(!error.empty()) UI::TextWrapped("%s",StatusText(error).c_str());
+        else {
+            const auto available=AvailableExchangeSlots(scopeEditing,masks);
+            if(!scopeDraftInitialized) {scopeDraft=available; scopeDraftInitialized=true;}
+            UI::BeginChild("Scope choices",{600,280});
+            for(unsigned bit=0;bit<32;++bit) if(available&(1u<<bit)) {
+                bool checked=(scopeDraft&(1u<<bit))!=0;
+                if(UI::Checkbox(std::to_string(bit+30).c_str(),&checked)) {
+                    scopeDraft=ToggleExchangeSlot(scopeDraft,1u<<bit,checked,masks);
+                }
+                for(std::size_t n=0;n<masks.size();++n) if(masks[n]&(1u<<bit)) {UI::SameLine(); UI::TextUnformatted(scopeEditing.items[n].name.c_str());}
+            }
+            for(std::size_t n=0;n<masks.size();++n) if(!masks[n] && scopeEditing.items[n].kind=="armor") {
+                UI::TextUnformatted(scopeEditing.items[n].name.c_str());
+                UI::SameLine(); UI::TextUnformatted(Tr("No equipment slots (not exchanged)"));
+            }
+            UI::EndChild();
+            if(UI::Button(Label("Select all slots"))) scopeDraft=available;
+            UI::SameLine(); if(UI::Button(Label("Clear slot selection"))) scopeDraft=0;
+            if(!scopeDraft) UI::TextUnformatted(Tr("No exchange slots selected. Equipment unchanged."));
+            if(UI::Button(Label("Save exchange slots"))) {
+                auto next=library; next.labels[scopeEditing.photo].exchangeSlots=scopeDraft;
+                if(CommitLibrary(std::move(next))) {SetStatus("Exchange slots saved. Applies on the next outfit change."); UI::CloseCurrentPopup();}
+            }
+        }
+        if(UI::Button(Label("Restore original scope"))) {
+            auto next=library; next.labels[scopeEditing.photo].exchangeSlots.reset();
+            if(CommitLibrary(std::move(next))) UI::CloseCurrentPopup();
+        }
+        UI::SameLine(); if(UI::Button(Label("Cancel"))) UI::CloseCurrentPopup();
+        UI::Separator();
+        UI::TextWrapped(Tr("Only selected slots are exchanged. The original preset and photo are kept."));
+        UI::TextWrapped(Tr("Items sharing a slot change together. Multi-slot items require all their slots."));
+        UI::TextWrapped(Tr("Worn items overlapping selected slots are replaced as whole items, including their other slots."));
         UI::EndPopup();
     }
     if(openTab) UI::OpenPopup("Edit category");

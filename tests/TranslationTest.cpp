@@ -1,10 +1,19 @@
 #include "ExternalTranslation.h"
 #include "TranslationKeys.h"
 #include <iostream>
+#include <fstream>
 void Check(bool ok) {if(!ok) throw std::runtime_error("Translation test failed");}
-int main() {
+int main(int argc, char** argv) {
     using namespace Gallery::Translation;
     try {
+        if(argc==2) {
+            std::ifstream input(argv[1],std::ios::binary);
+            Check(static_cast<bool>(input));
+            const std::string bytes((std::istreambuf_iterator<char>(input)),{});
+            auto pack=Parse(bytes,Keys());
+            Check(pack.rejected==0 && pack.strings.size()==Keys().size());
+            std::cout<<"Validated translation file: "<<pack.strings.size()<<" entries\n";
+        }
         Check(Valid("Follower: %s","対象: %s"));
         Check(Valid("%u / %.1f","%u 個 / %.1f"));
         for(const auto& bad:{"%n","%ls","%s %s","%1$s","%*s","%999s","%","abc##id",""}) Check(!Valid("%s",bad));

@@ -20,7 +20,7 @@
 
 using namespace REL::literals;
 SKSEPluginInfo(
-    .Version = "1.0.9.0"_v,
+    .Version = "1.0.10.0"_v,
     .Name = "OutfitGallery",
     .Author = "Outfit Gallery contributors",
     // SKSE's final component is the store identifier: GOG is 1, not 0.
@@ -44,7 +44,7 @@ const StudioSettings initialCamera{};
 std::string startupTab=initialCamera.startupTab;
 std::atomic<float> distance{initialCamera.distance}, height{initialCamera.height}, orbit{initialCamera.orbit}, pitch{initialCamera.pitch}, fov{initialCamera.fov}, lateral{initialCamera.lateral}, elevation{initialCamera.elevation};
 bool showNames=true, showCounts=true;
-bool addMissing{true}, showCameraSettings{};
+bool addMissing{true}, showCameraSettings{}; std::atomic<bool> preferEnchanted{true}; std::string enchantNotice;
 std::atomic<bool> detachedPreview{}, cameraCentered{}, followerTargeting{};
 RE::ActorHandle studioActor, verificationActor; // game-thread only, never raw retained pointers
 std::atomic<bool> followerMaintained{};
@@ -66,7 +66,7 @@ ULONGLONG settingsChangedAt{};
 const std::filesystem::path settingsFile="Data/SKSE/Plugins/OutfitGallery/StudioSettings.json";
 void SaveSettingsIfDue(bool force=false) {
     if (!force && (!settingsChangedAt || GetTickCount64()-settingsChangedAt<600)) return;
-    try { WriteStudioSettings({distance.load(),height.load(),orbit.load(),pitch.load(),fov.load(),gridColumns,showNames,showCounts,language,allowFreeCamera.load(),addMissing,lateral.load(),elevation.load(),partialSlots.load(),startupTab,detachedPreview.load(),previewRect,followerTargeting.load()},settingsFile); }
+    try { WriteStudioSettings({distance.load(),height.load(),orbit.load(),pitch.load(),fov.load(),gridColumns,showNames,showCounts,language,allowFreeCamera.load(),addMissing,lateral.load(),elevation.load(),partialSlots.load(),startupTab,detachedPreview.load(),previewRect,followerTargeting.load(),preferEnchanted.load()},settingsFile); }
     catch(const std::exception& e) { SKSE::log::error("Settings save: {}",e.what()); }
     settingsChangedAt=0;
 }
@@ -89,9 +89,15 @@ std::atomic<bool> saveBusy{};
 std::mutex presetsMutex;
 std::vector<Preset> presets;
 Preset stagedPreset, requestedPreset;
+// Request/response values only; no game pointers cross to the renderer.
+Preset scopeRequest;
+std::vector<std::uint32_t> scopeMasks;
+std::string scopeError;
+bool scopeReady{}; // guarded by presetsMutex
+
 Preset verificationTarget;
 std::atomic<unsigned> verificationTicks{}; // also read by the render-thread task scheduler
-ULONGLONG verificationDue{};
+ULONGLONG verificationDue{}; bool verificationPrefer{};
 std::string requestedName;
 
 
@@ -288,7 +294,8 @@ void VerifyEquipment(bool immediate=false) {
             verificationTicks=0;
             ReclaimManagedItems(actor.get());
             RefreshFollowerOutfit(actor.get());
-            SetStatus("Outfit restored: "+verificationTarget.name);
+            if(verificationPrefer) enchantNotice=VerifyPreferredEquipment(actor.get(),verificationTarget);
+            SetStatus("Outfit restored: "+verificationTarget.name+enchantNotice);
         } else if(due) {
             verificationTicks=0;
             SetStatus("Equipment differs after apply: "+verificationTarget.name);
@@ -317,17 +324,27 @@ void Tick() {
         try {
             const auto scope=requested==5?partialSlots.load():0;
             if(requested==5 && !scope) throw std::runtime_error("Select at least one slot.");
-            auto p = requested==6?SnapshotAccessories(subject.get()):SnapshotEquipment(subject.get(),scope);
+            auto p = requested==6?SnapshotAccessories(subject.get(),true):SnapshotEquipment(subject.get(),scope,true);
             { std::scoped_lock lock(presetsMutex); p.name = requestedName.empty() ? "Outfit " + std::to_string(presets.size()+1) : requestedName; stagedPreset = std::move(p); }
             captureRequested = true;
         } catch (const std::exception& e) { saveBusy = false; SetStatus(e.what()); }
+    }
+    if(requested==10) {
+        Preset p; {std::scoped_lock lock(presetsMutex); p=scopeRequest;}
+        std::vector<std::uint32_t> masks; std::string error;
+        try {masks=ResolvePresetSlots(p);} catch(const std::exception& e) {error=e.what();}
+        {std::scoped_lock lock(presetsMutex); if(scopeRequest.photo==p.photo) {scopeMasks=std::move(masks); scopeError=std::move(error); scopeReady=true;}}
     }
     if (requested == 4 && !saveBusy) {
         verificationTicks=0;
         try {
             Preset p; bool add;
             { std::scoped_lock lock(presetsMutex); p = requestedPreset; add = requestedAddMissing; }
-            SetStatus(ApplyEquipment(subject.get(),p,add)); verificationActor=subject->CreateRefHandle(); verificationTarget=ClothingPreset(p); verificationDue=GetTickCount64()+750; verificationTicks=1;
+            if(p.exchangeSlots) {
+                if(!*p.exchangeSlots) {SetStatus("No exchange slots selected. Equipment unchanged."); return;}
+                p=FilterExchangeSlots(p,ResolvePresetSlots(p));
+            }
+            enchantNotice.clear(); verificationPrefer=preferEnchanted.load(); auto result=ApplyEquipment(subject.get(),p,add,verificationPrefer); const auto warning=result.find(" Registered enchantment not restored:"); if(warning!=std::string::npos) enchantNotice=result.substr(warning); SetStatus(result); verificationActor=subject->CreateRefHandle(); verificationTarget=ClothingPreset(p); verificationDue=GetTickCount64()+750; verificationTicks=1;
             VerifyEquipment(true);
         } catch (const std::exception& e) { SetStatus(e.what()); }
     }
@@ -755,7 +772,7 @@ void Message(SKSE::MessagingInterface::Message* message) {
         try {
             if(std::filesystem::exists(settingsFile)) {
                 const auto s=ReadStudioSettings(settingsFile);
-                distance=s.distance; height=s.height; orbit=s.orbit; pitch=s.pitch; fov=s.fov; lateral=s.lateral; elevation=s.elevation; gridColumns=s.columns; showNames=s.showNames; showCounts=s.showCounts; language=s.language; allowFreeCamera=s.allowFreeCamera; addMissing=s.addMissing; partialSlots=s.headSlots; startupTab=s.startupTab; detachedPreview=s.detachedPreview; previewRect=s.previewRect; followerTargeting=s.followerTargeting;
+                distance=s.distance; height=s.height; orbit=s.orbit; pitch=s.pitch; fov=s.fov; lateral=s.lateral; elevation=s.elevation; gridColumns=s.columns; showNames=s.showNames; showCounts=s.showCounts; language=s.language; allowFreeCamera=s.allowFreeCamera; addMissing=s.addMissing; partialSlots=s.headSlots; startupTab=s.startupTab; detachedPreview=s.detachedPreview; previewRect=s.previewRect; followerTargeting=s.followerTargeting; preferEnchanted=s.preferEnchanted;
                 SKSE::log::info("Loaded persistent studio settings");
             }
         } catch(const std::exception& e) { SetStatus(std::string("Camera settings: ")+e.what()); }
@@ -802,7 +819,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
         SKSE::log::error("Unsupported Skyrim runtime {}. Supported targets: 1.5.97, 1.6.353, 1.6.640, 1.6.1130, 1.6.1170, GOG 1.6.1179, Steam 1.7.104. VR is not enabled.",runtime.string());
         return false;
     }
-    SKSE::log::info("Runtime {} accepted; 1.0.9 runtime target; Steam 1.7.104 user-tested; GOG 1.6.1179 untested.",runtime.string());
+    SKSE::log::info("Runtime {} accepted; 1.0.10 runtime target; Steam 1.7.104 user-tested; GOG 1.6.1179 untested.",runtime.string());
     SKSE::Init(skse, false);
     Gallery::InitializeManagedItems();
     const auto ini = std::filesystem::absolute("Data/SKSE/Plugins/OutfitGallery.ini");
@@ -810,7 +827,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
     Gallery::saveHotkey = GetPrivateProfileIntW(L"Input", L"SaveHotkey", 67, ini.c_str());
     Gallery::captureKeys[0]=Gallery::saveHotkey;
     Gallery::gamepadHotkey = GetPrivateProfileIntW(L"Input", L"GamepadHotkey", 32, ini.c_str());
-    SKSE::log::info("OutfitGallery 1.0.9 (CommonLib 10.1.0); runtime {}; key={}", runtime.string(), Gallery::hotkey.load());
+    SKSE::log::info("OutfitGallery 1.0.10 (CommonLib 10.1.0); runtime {}; key={}", runtime.string(), Gallery::hotkey.load());
     return SKSE::GetMessagingInterface()->RegisterListener(Gallery::Message);
 }
 

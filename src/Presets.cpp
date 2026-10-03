@@ -56,7 +56,7 @@ StudioSettings ReadStudioSettings(const std::filesystem::path& path) {
     std::ifstream in(path); Json j; in>>j;
     if(j.at("schema").get<int>()!=1) throw std::runtime_error("Unsupported settings schema");
     StudioSettings s{j.at("distance"),j.at("height"),j.at("orbit"),j.at("pitch"),j.at("fov"),j.value("columns",3)};
-    s.showNames=j.value("showNames",true); s.showCounts=j.value("showCounts",true); s.language=j.value("language",0); s.allowFreeCamera=j.value("allowFreeCamera",false); s.addMissing=j.value("addMissing",true);
+    s.showNames=j.value("showNames",true); s.showCounts=j.value("showCounts",true); s.language=j.value("language",0); s.allowFreeCamera=j.value("allowFreeCamera",false); s.addMissing=j.value("addMissing",true); s.preferEnchanted=j.value("preferEnchanted",true);
     s.headSlots=j.value("headSlots",0x1803u);
     s.startupTab=j.value("startupTab",std::string{});
     s.followerTargeting=j.value("followerTargeting",false);
@@ -66,7 +66,7 @@ StudioSettings ReadStudioSettings(const std::filesystem::path& path) {
 }
 void WriteStudioSettings(const StudioSettings& s,const std::filesystem::path& path) {
     ValidateSettings(s);
-    Json j={{"schema",1},{"distance",s.distance},{"height",s.height},{"orbit",s.orbit},{"pitch",s.pitch},{"fov",s.fov},{"columns",s.columns},{"showNames",s.showNames},{"showCounts",s.showCounts},{"language",s.language},{"allowFreeCamera",s.allowFreeCamera},{"addMissing",s.addMissing},{"lateral",s.lateral},{"elevation",s.elevation},{"headSlots",s.headSlots},{"startupTab",s.startupTab},{"detachedPreview",s.detachedPreview},{"previewRect",s.previewRect},{"followerTargeting",s.followerTargeting}};
+    Json j={{"schema",1},{"distance",s.distance},{"height",s.height},{"orbit",s.orbit},{"pitch",s.pitch},{"fov",s.fov},{"columns",s.columns},{"showNames",s.showNames},{"showCounts",s.showCounts},{"language",s.language},{"allowFreeCamera",s.allowFreeCamera},{"addMissing",s.addMissing},{"preferEnchanted",s.preferEnchanted},{"lateral",s.lateral},{"elevation",s.elevation},{"headSlots",s.headSlots},{"startupTab",s.startupTab},{"detachedPreview",s.detachedPreview},{"previewRect",s.previewRect},{"followerTargeting",s.followerTargeting}};
     std::filesystem::create_directories(path.parent_path());
     auto tmp=path; tmp+=".tmp";
     {std::ofstream out(tmp,std::ios::binary|std::ios::trunc); out.exceptions(std::ios::badbit|std::ios::failbit); out<<j.dump(2); out.close();}
@@ -124,6 +124,12 @@ Library ReadLibrary(const std::filesystem::path& path) {
     l.order=j.value("order",std::vector<std::string>{});
     for(const auto& c:j.at("categories")) l.categories.push_back({c.at("id"),c.at("name")});
     for(const auto& [key,value]:j.at("labels").items()) l.labels[key]={value.at("name"),value.at("categories").get<std::vector<std::string>>(),value.at("deleted")};
+    for(const auto& [key,value]:j.at("labels").items()) if(value.contains("exchangeSlots")) {
+        const auto& m=value.at("exchangeSlots");
+        if(!m.is_number_integer() || m.get<std::int64_t>()<0 || m.get<std::uint64_t>()>UINT32_MAX)
+            throw std::runtime_error("Invalid exchange slots.");
+        l.labels[key].exchangeSlots=m.get<std::uint32_t>();
+    }
     CheckLibrary(l); return l;
 }
 void DeleteTrashedFiles(const std::string& photo,const Library& library,const std::filesystem::path& root) {
@@ -153,6 +159,7 @@ void WriteLibrary(const Library& l,const std::filesystem::path& path) {
     j["order"]=l.order;
     for(const auto& c:l.categories) j["categories"].push_back({{"id",c.id},{"name",c.name}});
     for(const auto& [key,value]:l.labels) j["labels"][key]={{"name",value.name},{"categories",value.categories},{"deleted",value.deleted}};
+    for(const auto& [key,value]:l.labels) if(value.exchangeSlots) j["labels"][key]["exchangeSlots"]=*value.exchangeSlots;
     std::filesystem::create_directories(path.parent_path()); auto tmp=path; tmp+=".tmp";
     {std::ofstream out(tmp,std::ios::binary|std::ios::trunc); out.exceptions(std::ios::failbit|std::ios::badbit); out<<j.dump(2); out.close();}
     if(!MoveFileExW(tmp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)) throw std::runtime_error("Could not save library");
@@ -178,7 +185,15 @@ void WritePreset(const Preset& p, const std::filesystem::path& path) {
     Validate(p);
     Json j = {{"schema",p.accessories?3:(p.slotMask?2:1)},{"name",p.name},{"photo",p.photo},{"items",Json::array()}};
     if(p.slotMask) j["slotMask"]=p.slotMask;
-    for (const auto& i : p.items) j["items"].push_back({{"plugin",i.plugin},{"localID",i.localID},{"name",i.name},{"kind",i.kind},{"hand",i.hand}});
+    for (const auto& i : p.items) {
+        Json item={{"plugin",i.plugin},{"localID",i.localID},{"name",i.name},{"kind",i.kind},{"hand",i.hand}};
+        if(i.preferred.custom) item["preferredEnchanted"]={{"scope",i.preferred.scope},{"id",i.preferred.id}};
+        if(i.preferred.custom && !i.preferred.signature.empty()) {
+            item["preferredEnchanted"]["signatureVersion"]=1;
+            item["preferredEnchanted"]["signature"]=i.preferred.signature;
+        }
+        j["items"].push_back(std::move(item));
+    }
     std::filesystem::create_directories(path.parent_path());
     auto tmp = path; tmp += ".tmp";
     { std::ofstream out(tmp, std::ios::binary | std::ios::trunc); out.exceptions(std::ios::failbit | std::ios::badbit); out << j.dump(2); out.close(); }
@@ -200,6 +215,20 @@ Preset ReadPreset(const std::filesystem::path& path) {
         const auto id = i.at("localID").get<std::int64_t>();
         if (id <= 0 || id > 0xFFFFFF) throw std::runtime_error("Invalid FormID");
         p.items.push_back({i.at("plugin"),static_cast<std::uint32_t>(id),i.at("name"),i.at("kind"),i.at("hand")});
+        if(i.contains("preferredEnchanted")) {
+            auto& pref=p.items.back().preferred; pref.custom=true;
+            try {
+                const auto& m=i.at("preferredEnchanted");
+                if(!m.at("scope").is_number_unsigned() || !m.at("id").is_number_unsigned()) continue;
+                const auto uid=m.at("id").get<std::uint64_t>();
+                if(uid>65535) continue;
+                pref.scope=m.at("scope").get<std::uint64_t>(); pref.id=static_cast<std::uint16_t>(uid);
+                if(m.contains("signatureVersion") && m["signatureVersion"]==1 && m.contains("signature") && m["signature"].is_string()) {
+                    const auto& signature=m["signature"].get_ref<const std::string&>();
+                    if(signature.size()<=16384) pref.signature=signature;
+                }
+            } catch(const Json::exception&) {pref.scope=0; pref.id=0;}
+        }
     }
     Validate(p); return p;
 }

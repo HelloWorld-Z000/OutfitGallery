@@ -1,26 +1,36 @@
 #include "ManagedItems.h"
+#include "EnchantmentSignature.h"
 #include "ManagedLedger.h"
 #include "Presets.h"
 #include "FollowerOutfits.h"
 #include <mutex>
 #include <set>
 #include <map>
+#include <random>
 
 namespace Gallery {
 namespace {
 using Identity=ManagedIdentity;
 std::mutex ledgerMutex;
 ManagedLedger ledger;
+std::map<std::uint16_t,std::uint64_t> preferredScopes;
+std::set<std::uint16_t> reservedPreferredIDs;
+constexpr std::uint32_t preferredRecord=0x454E4348;
 constexpr std::uint32_t namespaceID=0x4F474D49; // OGMI
 constexpr std::uint32_t itemRecord=0x4954454D; // ITEM
 
 void Forget(const Identity& key) {std::scoped_lock lock(ledgerMutex); ledger.items.erase(key);}
 void Revert(SKSE::SerializationInterface*) {
-    {std::scoped_lock lock(ledgerMutex); ledger.Clear();}
+    {std::scoped_lock lock(ledgerMutex); ledger.Clear(); preferredScopes.clear(); reservedPreferredIDs.clear();}
     ClearFollowerOutfits();
 }
 void Save(SKSE::SerializationInterface* s) {
     SaveFollowerOutfits(s);
+    if(!preferredScopes.empty()) {
+        const auto count=static_cast<std::uint32_t>(preferredScopes.size());
+        if(!s->OpenRecord(preferredRecord,2) || !s->WriteRecordData(count)) {SKSE::log::error("Enchanted item: identity scope save failed"); return;}
+        for(const auto& [id,scope]:preferredScopes) if(!s->WriteRecordData(id) || !s->WriteRecordData(scope)) {SKSE::log::error("Enchanted item: reserved ID save failed"); return;}
+    }
     std::set<Identity> copy;
     {std::scoped_lock lock(ledgerMutex); copy=ledger.items;}
     for(const auto& k:copy) {
@@ -31,9 +41,18 @@ void Save(SKSE::SerializationInterface* s) {
 }
 void Load(SKSE::SerializationInterface* s) {
     ClearFollowerOutfits();
+    preferredScopes.clear(); reservedPreferredIDs.clear();
     std::set<Identity> next;
     std::uint32_t type{},version{},length{};
     while(s->GetNextRecordInfo(type,version,length)) {
+        if(type==preferredRecord) {
+            std::uint32_t count{};
+            if(version!=2 || length<4 || s->ReadRecordData(count)!=4 || count>65535 || length!=4+count*10) continue;
+            std::map<std::uint16_t,std::uint64_t> scopes; bool valid=true;
+            for(std::uint32_t n=0;n<count;++n) {std::uint16_t id{}; std::uint64_t scope{}; if(s->ReadRecordData(id)!=2 || s->ReadRecordData(scope)!=8 || !id || !scope || !scopes.emplace(id,scope).second) valid=false;}
+            if(valid) {preferredScopes=std::move(scopes); for(const auto& [id,scope]:preferredScopes) reservedPreferredIDs.insert(id);}
+            continue;
+        }
         if(LoadFollowerOutfit(s,type,version,length)) continue;
         if(type!=itemRecord || (version!=1 && version!=2) || length!=10) continue;
         Identity old, current;
@@ -54,6 +73,36 @@ class Transfers final : public RE::BSTEventSink<RE::TESContainerChangedEvent> {
         return RE::BSEventNotifyControl::kContinue;
     }
 } transfers;
+}
+std::uint64_t PreferredScope(std::uint16_t id) {const auto it=preferredScopes.find(id); return it==preferredScopes.end()?0:it->second;}
+PreferredItem RememberEnchanted(RE::Actor* actor,RE::ExtraDataList* extra) {
+    if(!actor || actor->GetFormID()!=0x14 || !extra || !extra->HasType<RE::ExtraEnchantment>()) return {};
+    PreferredItem result; result.custom=true;
+    if(extra->GetCount()!=1) return result;
+    auto* changes=actor->GetInventoryChanges(); if(!changes) return result;
+    auto* uid=extra->GetByType<RE::ExtraUniqueID>();
+    // Never replace identities owned by the engine or another mod/container.
+    if(uid && (uid->baseID!=0x14 || !uid->uniqueID)) {
+        SKSE::log::info("Enchanted item: registration fallback: existing identity owner={:08X} id={} is outside the supported player identity scope",uid->baseID,uid->uniqueID);
+        return result;
+    }
+    if(!uid) {
+        std::set<std::uint16_t> used=reservedPreferredIDs;
+        for(const auto& [obj,data]:actor->GetInventory()) if(data.second && data.second->extraLists)
+            for(auto* e:*data.second->extraLists) if(e) if(auto* id=e->GetByType<RE::ExtraUniqueID>(); id && id->baseID==0x14) used.insert(id->uniqueID);
+        {std::scoped_lock lock(ledgerMutex); for(const auto& key:ledger.items) if(key.owner==0x14) used.insert(key.id);}
+        std::uint16_t id{};
+        for(unsigned n=0;n<65536;++n) {const auto next=changes->GetNextUniqueID(); if(next && !used.contains(next)) {id=next; break;}}
+        if(!id) return result;
+        uid=new RE::ExtraUniqueID(0x14,id); extra->Add(uid);
+    }
+    auto& scope=preferredScopes[uid->uniqueID];
+    if(!scope) {std::random_device random; do {scope=(static_cast<std::uint64_t>(random())<<32)^random();} while(!scope);}
+    reservedPreferredIDs.insert(uid->uniqueID);
+    result.scope=scope; result.id=uid->uniqueID;
+    result.signature=EnchantmentSignature(extra);
+    SKSE::log::debug("Enchanted item: registered player enchanted instance id={}; save the game to persist identity scope",uid->uniqueID);
+    return result;
 }
 void InitializeManagedItems() {
     auto* s=SKSE::GetSerializationInterface();
@@ -80,6 +129,7 @@ void TrackNewManagedItems(RE::Actor* actor) {
     if(!changes) return;
     auto inventory=actor->GetInventory();
     std::set<std::uint16_t> used;
+    if(actor->GetFormID()==0x14) used=reservedPreferredIDs;
     for(const auto& [_,data]:inventory) if(data.second && data.second->extraLists) {
         for(auto* extra:*data.second->extraLists) if(extra) if(auto* id=extra->GetByType<RE::ExtraUniqueID>()) {
             if(id->baseID==actor->GetFormID()) used.insert(id->uniqueID);

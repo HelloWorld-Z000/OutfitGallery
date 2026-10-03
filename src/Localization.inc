@@ -18,6 +18,28 @@ void LoadExternalTranslation() {
     }
 }
 const std::map<std::string,std::string> japanese{
+ {"Worn items overlapping selected slots are replaced as whole items, including their other slots.","現在着用中の装備が選択スロットに重なる場合、その装備は丸ごと交換します。"},
+ {"Saving a selection limits this outfit to those slots. Restore original scope to replace the full outfit.","対象を保存すると、選んだスロットだけを交換します。全身の着替えに戻すには「登録時の交換範囲に戻す」を選んでください。"},
+ {"No equipment slots (not exchanged)","スロットなし（交換対象外）"},
+ {"Exchange slots modified","交換対象スロットを変更済み"},
+ {"Exchange slots","交換対象スロット"},
+ {"Only selected slots are exchanged. The original preset and photo are kept.","選んだスロットだけ交換します。元のセットと写真は残ります。"},
+ {"Items sharing a slot change together. Multi-slot items require all their slots.","同じスロットの装備・複数スロットを使う装備は、まとめて扱います。"},
+ {"Loading equipment slots...","装備スロットを確認中…"},
+ {"Select all slots","すべて選択"},
+ {"Clear slot selection","すべて解除"},
+ {"Save exchange slots","交換対象を保存"},
+ {"Restore original scope","登録時の交換範囲に戻す"},
+ {"No exchange slots selected. Equipment unchanged.","交換対象が未選択のため、装備は変更しません。"},
+ {"Exchange slots saved. Applies on the next outfit change.","交換対象を保存しました。次の着替えから適用します。"},
+ {"Invalid exchange slots.","交換対象スロットの設定が無効です。"},
+ {"Select all slots used by each item.","装備が使用するすべてのスロットを選択してください。"},
+ {"No saved items in the selected slots.","選択したスロットに登録済みの装備がありません。"},
+ {"Worn item also uses unselected slots: ","現在の装備が選択範囲外のスロットも使用しています："},
+ {"Prefer registered enchanted items","登録した付呪付き装備を優先する"},
+ {"Player only. Uses owned registered enchanted items; otherwise uses normal equipment and notifies you. Applies on the next outfit change. Re-register older sets to record enchantments.","プレイヤーのみ。登録した付呪品を所持していれば優先し、なければ通常の装備に戻して通知します。次の着替えから適用。古いセットは付呪品を着て再登録してください。"},
+ {"Generated items use base properties; custom enchantments are not recreated.","追加する装備は基本性能です。自作付呪を生成・複製する機能ではありません。"},
+ {"Registered enchantment not restored: ","登録した付呪は再現されていません："},
  {"Maintain this follower's outfit","この服装を維持"},
  {"Restore standard outfit","標準装備に戻す"},
  {"Disables maintenance and restores standard armor. Given items and weapons are kept.","維持を解除して標準の防具を着せ直します。渡した所持品と武器は残します。"},
@@ -133,9 +155,14 @@ std::string CategoryTitle(const Category& c) {
     return c.name;
 }
 std::string StatusText(const std::string& text) {
+    // Translate our warning separately; keep item and preset names unchanged.
+    constexpr std::string_view marker=" Registered enchantment not restored: ";
+    if(const auto pos=text.find(marker); pos!=std::string::npos) {
+        return StatusText(text.substr(0,pos))+" "+Tr("Registered enchantment not restored: ")+text.substr(pos+marker.size());
+    }
     if(language==2) {
         if(externalTranslation.strings.contains(text)) return externalTranslation.strings.at(text);
-        const char* prefixes[]{"Item uses unselected slots: ","Camera preset saved: ","Empty camera slot: ","Photo + outfit saved: ","Outfit restored: ","Equipment differs after apply: ","Missing or changed mod item: ","Equip requests sent: ","Cannot open studio: ","Not owned: "};
+        const char* prefixes[]{"Worn item also uses unselected slots: ","Item uses unselected slots: ","Camera preset saved: ","Empty camera slot: ","Photo + outfit saved: ","Outfit restored: ","Equipment differs after apply: ","Missing or changed mod item: ","Equip requests sent: ","Cannot open studio: ","Not owned: "};
         for(auto* prefix:prefixes) if(text.starts_with(prefix)) {
             const auto remainder=text.substr(std::char_traits<char>::length(prefix));
             return std::string(Tr(prefix))+Tr(remainder.c_str());
@@ -146,6 +173,7 @@ std::string StatusText(const std::string& text) {
     if(japanese.contains(text)) return japanese.at(text);
     if(text.starts_with("Cannot open studio: ")) return std::string("画面を開けません：")+Tr(text.substr(20).c_str());
     const std::pair<std::string,std::string> prefixes[]{
+        {"Worn item also uses unselected slots: ","現在の装備が選択範囲外のスロットも使用しています："},
         {"Item uses unselected slots: ","未選択のスロットも使う装備があります。対象スロットを確認してください："},
         {"Camera preset saved: ","カメラプリセットを保存しました："},{"Empty camera slot: ","未登録の番号です。カメラ設定から現在の構図を保存してください："},
         {"Photo + outfit saved: ","写真と装備を保存しました："},{"Outfit restored: ","装備の復元を確認しました："},

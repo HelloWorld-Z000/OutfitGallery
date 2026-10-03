@@ -1,14 +1,8 @@
-OutfitGallery 1.0.9 validation
-Build: MSVC 19.44, CommonLibSSE-NG 10.1.0, RelWithDebInfo.
-PASS 5/5: ExternalTranslationValidation, UpscalerLayoutPolicy, PortraitPngCrop,
-PresetPersistence, ManagedLedgerIsolation.
-PASS exported 1.0.9 metadata and all seven exact runtime compatibility entries.
-Capture.cpp combines tested photo-fix1 and unchanged scale-fix1 layout helper.
-Photo fix: affected Steam 1.5.97 user verified existing and new photos. Log shows
-renderer-device fallback after swap GetDevice returned 0x80004002.
-Source log: https://pastebin.com/6nNf9hZ9
-Scale fix: PureDark Build 18 DLSS user confirmed corrected layout (FG off).
-External Japanese test translations and English fallback verified by the author.
-Default Add missing base items ON; explicit saved preferences preserved.
-Final combined DLL not yet smoke-tested in game. GOG/other upscalers unverified.
-No transmog prototype included. Photo/preset formats unchanged.
+OutfitGallery 1.0.10 final assembly
+Based on user-tested scope-test11. Default enchanted preference ON added; persisted choices retained.
+MSVC 19.44 x64 RelWithDebInfo build succeeded (2026-10-03).
+CTest: 9/9 passed. Includes default ON for new settings and missing legacy field, persisted ON/OFF roundtrips, no loss of enchantment metadata when OFF, exchange-slot policy/persistence, translation validation, managed-item identity isolation, capture and display-layout policy.
+User confirmed scope-test5 exchange behavior and the subsequent scope editor layout; title-only hover and cyan marker were reviewed through scope-test11. Drop/pickup, save/load and storage/retrieval enchanted-item preference were confirmed during prior testing.
+Final assembly keeps the tested UI/equipment behavior, enables preference by default and removes scope diagnostic logging. This exact final DLL has not yet been loaded in-game.
+No new automatic-cleanup fix, ghost-UI scale-fix2, transmog or performance experiments are included.
+Main package includes the external translation template; no Chinese translation package is produced.

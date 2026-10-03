@@ -11,6 +11,20 @@ int main() {
         Preset p{"白いドレス","portrait-1.png",{{"Dress.esp",0xABC,"ドレス","armor",""},{"Sword.esl",0x801,"Sword","weapon","left"},{"Sword.esl",0x801,"Sword","weapon","right"}}};
         WritePreset(p,folder/"valid.json");
         auto q=ReadPreset(folder/"valid.json");
+        if(q.items[0].preferred.custom) throw std::runtime_error("legacy preset acquired preference");
+        auto enchanted=p; enchanted.items[0].preferred={true,0xFEDCBA9876543210ULL,65000,"stable-effect-signature"};
+        WritePreset(enchanted,folder/"enchanted.json");
+        auto remembered=ReadPreset(folder/"enchanted.json");
+        if(!remembered.items[0].preferred.custom || remembered.items[0].preferred.scope!=enchanted.items[0].preferred.scope || remembered.items[0].preferred.id!=65000) throw std::runtime_error("preferred identity lost");
+        if(remembered.items[0].preferred.signature!="stable-effect-signature") throw std::runtime_error("preferred signature lost");
+        StudioSettings prefSettings;
+        if(!prefSettings.preferEnchanted) throw std::runtime_error("preference not default ON");
+        {std::ofstream out(folder/"legacy-preference.json"); out<<R"({"schema":1,"distance":220,"height":65,"orbit":0,"pitch":0,"fov":60})";}
+        if(!ReadStudioSettings(folder/"legacy-preference.json").preferEnchanted) throw std::runtime_error("missing preference field not default ON");
+        prefSettings.preferEnchanted=true; WriteStudioSettings(prefSettings,folder/"prefer.json");
+        if(!ReadStudioSettings(folder/"prefer.json").preferEnchanted) throw std::runtime_error("preference not saved");
+        prefSettings.preferEnchanted=false; WriteStudioSettings(prefSettings,folder/"prefer.json");
+        if(ReadStudioSettings(folder/"prefer.json").preferEnchanted || ReadPreset(folder/"enchanted.json").items[0].preferred.id!=65000) throw std::runtime_error("OFF erased identity");
         if(q.name!=p.name || q.items.size()!=3 || q.items[0].localID!=0xABC || q.items[1].hand!="left" || q.items[2].plugin!="Sword.esl") throw std::runtime_error("round trip failed");
         auto legacy=q;
         legacy.items.push_back({"MissingArrows.esp",0x800,"Arrows","ammo",""});
@@ -170,6 +184,34 @@ int main() {
         if(!SameEquipment(p,independent)) throw std::runtime_error("equipment comparison depends on name or order");
         independent.items[0].hand="left";
         if(SameEquipment(p,independent)) throw std::runtime_error("equipment comparison missed wrong hand");
+        // The library owns the editable scope, never the original preset file.
+        Library scopes; scopes.labels["portrait-1.png"].exchangeSlots=0;
+        WriteLibrary(scopes,folder/"scopes.json");
+        auto scopeLoaded=ReadLibrary(folder/"scopes.json");
+        if(!scopeLoaded.labels.at("portrait-1.png").exchangeSlots || *scopeLoaded.labels.at("portrait-1.png").exchangeSlots!=0) throw std::runtime_error("zero override lost");
+        scopes.labels["portrait-1.png"].exchangeSlots=0x80000000u;
+        WriteLibrary(scopes,folder/"scopes.json");
+        if(ReadLibrary(folder/"scopes.json").labels.at("portrait-1.png").exchangeSlots!=0x80000000u) throw std::runtime_error("slot 61 lost");
+        scopes.labels["portrait-1.png"].exchangeSlots.reset();
+        WriteLibrary(scopes,folder/"scopes.json");
+        if(ReadLibrary(folder/"scopes.json").labels.at("portrait-1.png").exchangeSlots) throw std::runtime_error("reset override failed");
+        {std::ofstream out(folder/"scopes-bad.json"); out<<R"({"schema":1,"categories":[],"labels":{"x.png":{"name":"","categories":[],"deleted":false,"exchangeSlots":-1}}})";}
+        caught=false;try{ReadLibrary(folder/"scopes-bad.json");}catch(const std::exception&){caught=true;}
+        if(!caught) throw std::runtime_error("negative scope accepted");
+        Preset partial{"parts","parts.png",{{"A.esp",1,"wig","armor",""},{"A.esp",2,"crown","armor",""},{"A.esp",3,"dress","armor",""}},0x1807,true};
+        partial.items[0].preferred={true,123,5,"enchanted-wig"};
+        const std::vector<std::uint32_t> masks{0x802,0x1000,4};
+        partial.exchangeSlots=0x802;
+        auto filtered=FilterExchangeSlots(partial,masks);
+        if(filtered.items.size()!=1 || filtered.items[0].name!="wig" || filtered.items[0].preferred.signature!="enchanted-wig" || filtered.slotMask!=0x802 || partial.items.size()!=3) throw std::runtime_error("scope selection changed source or enchantment");
+        partial.exchangeSlots=0; filtered=FilterExchangeSlots(partial,masks);
+        if(!filtered.items.empty() || !filtered.exchangeSlots || *filtered.exchangeSlots) throw std::runtime_error("empty scope not explicit");
+        partial.exchangeSlots=2; caught=false;try{FilterExchangeSlots(partial,masks);}catch(const std::exception&){caught=true;}
+        if(!caught) throw std::runtime_error("split multi-slot item accepted");
+        partial.exchangeSlots=0x80000000u; caught=false;try{FilterExchangeSlots(partial,masks);}catch(const std::exception&){caught=true;}
+        if(!caught) throw std::runtime_error("out-of-scope selection accepted");
+        partial.exchangeSlots.reset();
+        if(FilterExchangeSlots(partial,{}).items.size()!=3) throw std::runtime_error("legacy scope changed");
         HoldButton hold;
         auto deletionRoot=folder/"deletion";
         auto trashPreset=p; trashPreset.photo="trash.png";

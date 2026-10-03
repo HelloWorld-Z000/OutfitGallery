@@ -36,3 +36,5 @@ Text is rendered using SKSE Menu Framework's existing font. This package does no
 characters missing from that font require suitable framework font configuration.
 
 You are welcome to distribute your Translation.json as a separate translation package.
+
+Translation packages should require the main Outfit Gallery mod. Distribute the translation file and any separately permitted font configuration; rebuilding or bundling the plugin DLL is unnecessary. Compare the latest template for new keys after updates.

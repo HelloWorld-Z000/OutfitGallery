@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.10 - Enchanted equipment and editable exchange slots
+
+- Prefer registered enchanted items is enabled by default for new or unset settings; saved ON/OFF choices are preserved. Matching owned items are preferred, with normal equipment behavior and a notice if unavailable. No enchantments are generated or cloned.
+- Add Exchange slots for saved outfits, headgear and accessories. Inspect item names and choose which slots to exchange without retaking the photo. Original presets/photos remain intact; Restore original scope restores their original behavior.
+- Mark modified exchange scopes with a small cyan dot on the photo. Photo tooltips now show only the preset name.
+- Reduce accidental photo dragging during clicks by allowing more mouse movement before dragging starts. Clicks still activate on release.
+- Keep registered enchantment metadata when preference is OFF, and protect customized items from automatic cleanup. Support a unique matching enchantment/tempering signature if a registered instance ID was lost in the same save scope.
+- Include an updated external translation template. Existing base-only presets remain usable; re-register enchanted equipment to record matching information.
+
 ## 1.0.9 - Photo loading, display scaling and external translations
 
 - Fix Missing photo when swap-chain device retrieval fails, using the renderer device as a fallback. Existing and newly saved photos were verified by an affected Steam 1.5.97 user.

@@ -1,5 +1,8 @@
 #pragma once
+#include "PreferredItem.h"
 namespace Gallery {
+PreferredItem RememberEnchanted(RE::Actor*, RE::ExtraDataList*);
+std::uint64_t PreferredScope(std::uint16_t id);
 void InitializeManagedItems();
 void RegisterManagedItemEvents();
 void BeginManagedAddition(RE::Actor*);

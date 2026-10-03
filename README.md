@@ -1,6 +1,6 @@
 # Outfit Gallery — Visual Outfit Manager
 
-**Version 1.0.9** · English / 日本語 · Native SKSE plugin
+**Version 1.0.10** · English / 日本語 · Native SKSE plugin
 
 Build a visual wardrobe: photograph equipped outfits, browse your collection, and change clothes by selecting a picture. Includes an optional independent preview window and experimental follower support. Weapons and ammunition are kept.
 
@@ -87,11 +87,23 @@ When updating, retain `Data/SKSE/Plugins/OutfitGallery/` and any customized INI.
 | --- | --- | --- |
 | Outfit / text tabs | Wear the complete outfit and register | Replace armor/clothing; keep weapons/ammunition |
 | Head / person icon | Register head items in enabled slots (30, 31, 41, 42 by default) | Change head equipment while retaining other equipment |
-| Accessories / ring icon | Wear **only the items you want to add**, then register | Add those items, replacing equipment in overlapping slots |
+| Accessories / ring icon | Register worn items; optionally select their exchange slots afterward | Add those items, replacing equipment in overlapping slots |
 
 Accessory mode uses what you are wearing, not an automatic jewelry classifier. For close-up accessory photos, adjust the camera before registration. Head and accessory photos have separate collections and do not appear in All or regular categories. They can be moved to Trash.
 
+You can also register accessories while dressed, then use Exchange slots to select only the desired accessories. Select all slots selects the slots occupied by the saved armor; unlike full replacement, it preserves unrelated worn equipment. Items spanning selected and unselected slots are replaced as whole pieces. Clearing all slots makes applying that preset a no-op. Legacy weapon/ammunition records remain excluded.
+
 Registration opens the matching collection and selects the new photo. The upper-right **?** button opens help. Options controls the opening tab (default: All), language, keys, head slots and display settings.
+
+## Exchange slots
+
+Right-click a saved photo (gamepad: press the right stick), then choose **Exchange slots**. The list shows slot numbers and saved armor names for outfits, headgear and accessories. Viewing and cancelling does not change the preset.
+
+Save your selection to apply it on the next outfit change. Multi-slot items are selected together; overlapping worn pieces are replaced as whole items. Clear all slots to make the preset exchange nothing. **Restore original scope** restores the original behavior, including full replacement for ordinary outfits. **Select all slots** selects only slots occupied by saved items; it is not the same as full replacement.
+
+The original photo and item list stay intact. Overrides are saved in `Library.json`, and photos with changed scopes have a small cyan dot at the upper left. Tooltips show only the preset name; use this editor to inspect details. Older versions do not apply these overrides and may discard them when editing the library.
+
+Photo clicks tolerate small mouse movements before starting a drag. Deliberate dragging still reorders photos; clicks activate on release.
 
 ## Default controls
 
@@ -117,9 +129,19 @@ In the right camera frame: **left drag** pans, **right drag** orbits/tilts, and 
 
 `Data/SKSE/Plugins/OutfitGallery/` contains `Captures/`, `Presets/`, `Library.json`, `StudioSettings.json`, `CameraPresets.json` and `Hotkeys.json`. Preserve the entire directory to retain the gallery. Hotkeys.json takes precedence over INI defaults.
 
-Presets record **base item identities** (source plugin and local FormID). Tempering, custom enchantments/names, poisons, spells and shouts are not restored. Original item plugins must be installed with unchanged identities. Changed slot assignments can prevent partial application. When applying a valid partial preset, conflicting worn armor is replaced as a whole, even if it occupies multiple slots; unrelated armor is kept.
+Presets record **base item identities** (source plugin and local FormID). Generated replacements do not recreate tempering, custom enchantments/names, poisons, spells or shouts. The optional enchanted-item preference below can select an existing owned item. Original item plugins must be installed with unchanged identities. Changed slot assignments can prevent partial application. When applying a valid partial preset, conflicting worn armor is replaced as a whole, even if it occupies multiple slots; unrelated armor is kept.
 
 **Add missing base items** restores items you do not own, including on a new character. It is enabled by default; previously saved ON/OFF preferences are preserved. Newly created items are tracked conservatively and reclaimed after they are unequipped by a verified gallery change. Existing owned items are retained. Ambiguous, transferred, customized or previously untracked items may remain. Ownership tracking belongs to the character's SKSE co-save; retain matching `.ess` and `.skse` files. Permanent deletion from Trash removes the photo/preset, not inventory items.
+
+## Prefer registered enchanted items
+
+This setting is **ON by default** for new settings or settings without this field. Saved ON/OFF choices are preserved. It applies to the **player only**, starting with the next outfit change. Wear your custom-enchanted armor/jewelry and register a new preset with 1.0.10. If you previously disabled the option, enable it to use the preference. Save the game after registration to retain the matching SKSE co-save identity records.
+
+When ON, the gallery first looks for the registered enchanted instance in your inventory. If its instance ID was lost, it can use a single item with matching recorded enchantment/tempering data. Multiple equivalent candidates, unsupported matching data, or a different save scope do not trigger an arbitrary preferred selection. If no suitable item is found, normal base-item behavior is used and a notice states that the registered enchantment was not restored. Missing base items are generated only when Add missing base items is enabled. No enchantments are created, cloned, or retrieved from containers.
+
+OFF uses the previous equipment selection behavior; it does not erase recorded enchantment information. Normal presets and OFF do not perform the extra enchanted-item search. Customized items, including generated items enchanted later, remain protected from automatic cleanup regardless of this option.
+
+Existing base-only presets still work; re-register the ones for which you want enchanted-item preference. Data from enchant-test2 remains usable. Older test presets without the effect signature need re-registration for the lost-ID fallback. This is not full instance archival: names, custom enchantments and tempering are not recreated on generated items, and changed or ambiguous instances may fall back. Keep matching .ess/.skse saves together; gallery files alone do not transfer an original enchanted instance to another character.
 
 ## Troubleshooting
 
