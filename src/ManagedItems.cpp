@@ -1,6 +1,7 @@
 #include "ManagedItems.h"
 #include "EnchantmentSignature.h"
 #include "ManagedLedger.h"
+#include "UniqueItemID.h"
 #include "Presets.h"
 #include "FollowerOutfits.h"
 #include <mutex>
@@ -18,6 +19,18 @@ std::set<std::uint16_t> reservedPreferredIDs;
 constexpr std::uint32_t preferredRecord=0x454E4348;
 constexpr std::uint32_t namespaceID=0x4F474D49; // OGMI
 constexpr std::uint32_t itemRecord=0x4954454D; // ITEM
+
+// Include all raw entries, even zero-count entries and IDs originating from
+// another container. The engine scans these too. Caller also supplies saved
+// reservations and ledger IDs; this function never changes existing identities.
+std::uint16_t AllocateItemID(RE::InventoryChanges* changes, std::set<std::uint16_t>& used) {
+    if(changes->entryList) for(auto* entry:*changes->entryList) if(entry && entry->extraLists)
+        for(auto* extra:*entry->extraLists) if(extra)
+            if(auto* uid=extra->GetByType<RE::ExtraUniqueID>()) used.insert(uid->uniqueID);
+    const auto candidate=changes->GetNextUniqueID();
+    const auto id=FindAvailableItemID(candidate,used);
+    return id;
+}
 
 void Forget(const Identity& key) {std::scoped_lock lock(ledgerMutex); ledger.items.erase(key);}
 void Revert(SKSE::SerializationInterface*) {
@@ -91,8 +104,7 @@ PreferredItem RememberEnchanted(RE::Actor* actor,RE::ExtraDataList* extra) {
         for(const auto& [obj,data]:actor->GetInventory()) if(data.second && data.second->extraLists)
             for(auto* e:*data.second->extraLists) if(e) if(auto* id=e->GetByType<RE::ExtraUniqueID>(); id && id->baseID==0x14) used.insert(id->uniqueID);
         {std::scoped_lock lock(ledgerMutex); for(const auto& key:ledger.items) if(key.owner==0x14) used.insert(key.id);}
-        std::uint16_t id{};
-        for(unsigned n=0;n<65536;++n) {const auto next=changes->GetNextUniqueID(); if(next && !used.contains(next)) {id=next; break;}}
+        const auto id=AllocateItemID(changes,used);
         if(!id) return result;
         uid=new RE::ExtraUniqueID(0x14,id); extra->Add(uid);
     }
@@ -148,11 +160,7 @@ void TrackNewManagedItems(RE::Actor* actor) {
             // pre/post 1.6.629. Never allocate ExtraDataList using compile-time size.
             auto* uid=extra->GetByType<RE::ExtraUniqueID>();
             if(uid) continue; // unknown provenance: never replace another system's ID
-            std::uint16_t id{};
-            for(unsigned attempt=0;attempt<65536;++attempt) {
-                const auto candidate=changes->GetNextUniqueID();
-                if(candidate && !used.contains(candidate)) {id=candidate; break;}
-            }
+            const auto id=AllocateItemID(changes,used);
             if(!id) continue;
             extra->Add(new RE::ExtraUniqueID(actor->GetFormID(),id));
             used.insert(id);

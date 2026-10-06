@@ -9,6 +9,17 @@
 #include <stdexcept>
 
 namespace Gallery {
+namespace {
+Microsoft::WRL::ComPtr<ID3D11Device> AcquireGalleryDevice() {
+    // Renderer::GetDevice is borrowed. ComPtr acquires our own reference.
+    // Avoid IDXGISwapChain::GetDevice: the CS D3D12 proxy in the tested
+    // generation returns its D3D11 device without the required AddRef.
+    // Releasing that result can prematurely destroy ReShade's wrapper state.
+    Microsoft::WRL::ComPtr<ID3D11Device> device;
+    device = reinterpret_cast<ID3D11Device*>(RE::BSGraphics::Renderer::GetDevice());
+    return device;
+}
+}
 LayoutSurface ReadLayoutSurface() {
     LayoutSurface result{};
     auto* window=RE::BSGraphics::Renderer::GetCurrentRenderWindow();
@@ -21,8 +32,8 @@ LayoutSurface ReadLayoutSurface() {
     if(FAILED(swap->GetBuffer(0,IID_PPV_ARGS(&buffer)))) return result;
     D3D11_TEXTURE2D_DESC texture{}; buffer->GetDesc(&texture);
     result.buffer={float(texture.Width),float(texture.Height)};
-    Microsoft::WRL::ComPtr<ID3D11Device> device;
-    if(FAILED(swap->GetDevice(IID_PPV_ARGS(&device)))) return result;
+    auto device=AcquireGalleryDevice();
+    if(!device) return result;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
     device->GetImmediateContext(&context);
     UINT count=D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
@@ -103,21 +114,10 @@ void* LoadPortraitView(const std::string& path) {
     if(report) SKSE::log::info("PHOTO-FIX1 load path={} absolute={} exists={} bytes={} pathError={} existsError={} sizeError={}",
         path,absoluteError?"unavailable":LogPath(absolute),exists,sizeError?0:bytes,absoluteError.value(),existsError.value(),sizeError.value());
     auto* window=RE::BSGraphics::Renderer::GetCurrentRenderWindow();
-    Microsoft::WRL::ComPtr<ID3D11Device> device;
-    HRESULT deviceResult=E_POINTER;
-    if(window && window->swapChain) {
-        auto* swap=reinterpret_cast<IDXGISwapChain*>(window->swapChain);
-        deviceResult=swap->GetDevice(IID_PPV_ARGS(&device));
-    }
-    const bool fallback=FAILED(deviceResult) || !device;
-    if(fallback) {
-        device.Reset();
-        // PNG decoding only needs the game's D3D device, not an active render
-        // window. Retain a COM reference for the duration of this operation.
-        device=reinterpret_cast<ID3D11Device*>(RE::BSGraphics::Renderer::GetDevice());
-    }
-    if(report) SKSE::log::info("PHOTO-FIX1 device window={} swap={} swapResult=0x{:08X} fallback={} available={}",
-        window!=nullptr,window && window->swapChain,static_cast<unsigned>(deviceResult),fallback,bool(device));
+    auto device=AcquireGalleryDevice();
+    const bool fallback=false;
+    if(report) SKSE::log::info("CS-COMPAT1 portrait device source=renderer-owned-reference window={} swap={} available={}",
+        window!=nullptr,window && window->swapChain,bool(device));
     if(!device) return nullptr;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> view;
     try {CreatePortraitView(device.Get(),std::filesystem::path(path),view.GetAddressOf());}

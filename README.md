@@ -1,8 +1,12 @@
 # Outfit Gallery — Visual Outfit Manager
 
-**Version 1.0.10** · English / 日本語 · Native SKSE plugin
+**Version 1.0.11** · English / 日本語 · Native SKSE plugin
 
 Build a visual wardrobe: photograph equipped outfits, browse your collection, and change clothes by selecting a picture. Includes an optional independent preview window and experimental follower support. Weapons and ammunition are kept.
+
+## Updating to 1.0.11
+
+Includes the generated-item cleanup fix and the CS/ReShade compatibility fix. Disable older test/diagnostic DLL overlays so this version takes priority. Keep your photos, presets and saved settings; no new game or preset re-registration is required. Previously generated items that were never tracked are not automatically removed. To check cleanup, store all copies of a test outfit's items in a container, let the gallery generate fresh copies, then switch to a different outfit with no shared equipment.
 
 ## Follower support (experimental)
 
@@ -135,7 +139,7 @@ Presets record **base item identities** (source plugin and local FormID). Genera
 
 ## Prefer registered enchanted items
 
-This setting is **ON by default** for new settings or settings without this field. Saved ON/OFF choices are preserved. It applies to the **player only**, starting with the next outfit change. Wear your custom-enchanted armor/jewelry and register a new preset with 1.0.10. If you previously disabled the option, enable it to use the preference. Save the game after registration to retain the matching SKSE co-save identity records.
+This setting is **ON by default** for new settings or settings without this field. Saved ON/OFF choices are preserved. It applies to the **player only**, starting with the next outfit change. Wear your custom-enchanted armor/jewelry and register a new preset with version 1.0.10 or later. If you previously disabled the option, enable it to use the preference. Save the game after registration to retain the matching SKSE co-save identity records.
 
 When ON, the gallery first looks for the registered enchanted instance in your inventory. If its instance ID was lost, it can use a single item with matching recorded enchantment/tempering data. Multiple equivalent candidates, unsupported matching data, or a different save scope do not trigger an arbitrary preferred selection. If no suitable item is found, normal base-item behavior is used and a notice states that the registered enchantment was not restored. Missing base items are generated only when Add missing base items is enabled. No enchantments are created, cloned, or retrieved from containers.
 
