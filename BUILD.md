@@ -1,4 +1,4 @@
-# Building Outfit Gallery 1.0.11
+# Building Outfit Gallery 1.0.13
 
 Use Windows x64, Visual Studio 2022 C++ tools (tested MSVC 19.44), CMake 3.24+, Ninja and C++23 support.
 
@@ -26,3 +26,6 @@ Keep CommonLib's normal multi-runtime compile options. This project's plugin met
 `PortraitPngCrop` exercises WARP/D3D PNG capture, scaling and display-view color handling. `PresetPersistence` exercises JSON persistence, validation, collection scope, settings and input helpers. Neither test simulates Skyrim equipment events or controller/UI interaction.
 
 The normal release archive contains the DLL, INI, user documentation and license notices. Publish the matching source archive alongside it. Keep generated photos, user JSON, game saves, local logs and build directories out of source control and release archives.
+
+
+The release uses the same CommonLib 10.1.0 static bundle as layout-test1. The dependency source archive is included under dependencies in the source ZIP. Use COMMONLIB_SOURCE to build it with your toolchain. Set VSLANG=1033 so Ninja can track MSVC include dependencies correctly.

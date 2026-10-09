@@ -14,13 +14,27 @@ std::string PadLabel(unsigned key) {
     default:return std::format("Button {}",key);
     }
 }
+unsigned HeldKeyboardModifiers() {
+    return ((GetAsyncKeyState(VK_CONTROL)&0x8000)?HotkeyChord::Ctrl:0u) |
+           ((GetAsyncKeyState(VK_SHIFT)&0x8000)?HotkeyChord::Shift:0u) |
+           ((GetAsyncKeyState(VK_MENU)&0x8000)?HotkeyChord::Alt:0u);
+}
+std::string OpeningKeyLabel() {
+    const auto mods=keyboardModifiers.load();std::string label;
+    if(mods&HotkeyChord::Ctrl) label+="Ctrl + ";
+    if(mods&HotkeyChord::Shift) label+="Shift + ";
+    if(mods&HotkeyChord::Alt) label+="Alt + ";
+    return label+KeyLabel(hotkey.load());
+}
 InputSettings CurrentInputSettings() {
-    InputSettings s{hotkey.load(),gamepadHotkey.load(),padHoldSeconds.load()};
+    InputSettings s{hotkey.load(),gamepadHotkey.load(),padHoldSeconds.load()}; s.keyboardModifiers=keyboardModifiers.load();
+    s.autoKeyboard=autoKeyboard;s.autoModifiers=autoModifiers;s.autoGamepad=autoGamepad;s.autoHoldSeconds=autoHoldSeconds;
     for(unsigned n=0;n<3;++n) {s.captureKeys[n]=captureKeys[n];s.capturePads[n]=capturePads[n];} return s;
 }
 void SaveInputSettings(const InputSettings& s) {
     WriteInputSettings(s,inputSettingsFile);
-    hotkey=s.keyboard; gamepadHotkey=s.gamepad; padHoldSeconds=s.holdSeconds;
+    autoKeyboard=s.autoKeyboard;autoModifiers=s.autoModifiers;autoGamepad=s.autoGamepad;autoHoldSeconds=s.autoHoldSeconds;
+    hotkey=s.keyboard; keyboardModifiers=s.keyboardModifiers; gamepadHotkey=s.gamepad; padHoldSeconds=s.holdSeconds;
     for(unsigned n=0;n<3;++n) {captureKeys[n]=s.captureKeys[n];capturePads[n]=s.capturePads[n];}
 }
 unsigned framePadEdges{},framePadRepeat{};
@@ -53,33 +67,41 @@ bool PadPressed(UI::ImGuiKey key,bool repeat=false) {
 std::string CaptureHint(unsigned n) {
     return KeyLabel(captureKeys[n])+" / "+PadLabel(capturePads[n]);
 }
-void ApplyHotkeys(unsigned keyboard,unsigned pad,float seconds) {
+void ApplyHotkeys(unsigned keyboard,unsigned pad,float seconds,unsigned modifiers=8) {
     try {
 
-        auto s=CurrentInputSettings(); s.keyboard=keyboard;s.gamepad=pad;s.holdSeconds=seconds; SaveInputSettings(s);
+        auto s=CurrentInputSettings(); s.keyboard=keyboard;s.gamepad=pad;s.holdSeconds=seconds; if(modifiers<=7) s.keyboardModifiers=modifiers; SaveInputSettings(s);
         hotkey=keyboard; gamepadHotkey=pad; padHoldSeconds=seconds;
         SetStatus("Menu hotkeys saved.");
     } catch(const std::exception& e) {SetStatus(e.what());}
 }
-void RenderHotkeys() {
+void ProcessCapturedHotkey() {
     const auto result=capturedBinding.exchange(0);
     if(result) {
-        if((result>>16)==1) ApplyHotkeys(result&0xFFFF,gamepadHotkey.load(),padHoldSeconds.load());
-        else if((result>>16)==2) ApplyHotkeys(hotkey.load(),result&0xFFFF,padHoldSeconds.load());
-        else {try {auto s=CurrentInputSettings();const unsigned mode=result>>16,n=(mode-3)/2;
+        if(HotkeyChord::Mode(result)==1) ApplyHotkeys(result&0xFFFF,gamepadHotkey.load(),padHoldSeconds.load(),HotkeyChord::Modifiers(result));
+        else if(HotkeyChord::Mode(result)==2) ApplyHotkeys(hotkey.load(),result&0xFFFF,padHoldSeconds.load());
+        else if(HotkeyChord::Mode(result)==9 || HotkeyChord::Mode(result)==10) {
+            try {auto s=CurrentInputSettings();if(HotkeyChord::Mode(result)==9) {s.autoKeyboard=result&0xFFFF;s.autoModifiers=HotkeyChord::Modifiers(result);}else s.autoGamepad=result&0xFFFF;SaveInputSettings(s);SetStatus("Menu hotkeys saved.");}
+            catch(const std::exception& e){SetStatus(e.what());}
+        }
+        else {try {auto s=CurrentInputSettings();const unsigned mode=HotkeyChord::Mode(result),n=(mode-3)/2;
             if(n<3) {if(mode%2) s.captureKeys[n]=result&0xFFFF;else s.capturePads[n]=result&0xFFFF; SaveInputSettings(s);}
         }catch(const std::exception& e){SetStatus(e.what());}}
     }
     if(bindingMode && GetTickCount64()>bindingDeadline) bindingMode=0;
-    UI::Text(Tr("Open menu (keyboard): %s"),KeyLabel(hotkey.load()).c_str());
+}
+void RenderHotkeys() {
+    UI::Text(Tr("Open menu (keyboard): %s"),OpeningKeyLabel().c_str());
     if(UI::Button(Label("Change keyboard key"))) {bindingMode=1;bindingDeadline=GetTickCount64()+10000;}
+    if(UI::IsItemHovered()) UI::SetTooltip("%s",Tr("Supports Ctrl, Shift and Alt combinations. Bind a key alone to remove modifiers. Other mods may still react to the same key."));
     UI::Text(Tr("Open menu (gamepad): %s / hold %.1f s"),Tr(PadLabel(gamepadHotkey.load()).c_str()),padHoldSeconds.load());
     if(UI::Button(Label("Change gamepad button"))) {bindingMode=2;bindingDeadline=GetTickCount64()+10000;}
     UI::SameLine(); if(UI::Button(Label("Disable gamepad hotkey"))) ApplyHotkeys(hotkey.load(),0,padHoldSeconds.load());
     float seconds=padHoldSeconds.load();
     if(UI::SliderFloat(Label("Hold duration"),&seconds,.4f,3.f,"%.1f s")) padHoldSeconds=seconds;
     if(UI::IsItemDeactivatedAfterEdit()) ApplyHotkeys(hotkey.load(),gamepadHotkey.load(),padHoldSeconds.load());
-    if(UI::CollapsingHeader(Label("Capture keys"))) {
+    {
+        UI::Separator();
         const char* names[]{"Save outfit","Save headgear","Save accessories"};
         for(unsigned n=0;n<3;++n) {
             UI::Text("%s: %s",Tr(names[n]),CaptureHint(n).c_str());
@@ -93,9 +115,38 @@ void RenderHotkeys() {
         UI::TextWrapped(Tr("Navigation buttons are reserved. Disable a conflicting capture binding before assigning it."));
     }
     if(bindingMode) {
-        UI::TextUnformatted(Tr("Press the new key/button. Escape or Cancel stops capture."));
+        UI::TextUnformatted(Tr((bindingMode==1 || bindingMode==9)?"Hold Ctrl, Shift or Alt and press a key, or press a key alone. Escape cancels.":"Press the new key/button. Escape or Cancel stops capture."));
         if(UI::Button(Label("Cancel binding"))) bindingMode=0;
     }
     UI::TextWrapped(Tr("Short gamepad presses pass through. Another mod may also react during a long press; choose an unused button if needed."));
     UI::Separator();
+}
+
+void RenderAutoHotkeys() {
+    UI::PushID("autoHotkeys");
+    std::string key;
+    const unsigned mods=autoModifiers.load();
+    if(mods&HotkeyChord::Ctrl) key+="Ctrl + ";
+    if(mods&HotkeyChord::Shift) key+="Shift + ";
+    if(mods&HotkeyChord::Alt) key+="Alt + ";
+    key+=KeyLabel(autoKeyboard.load());
+    UI::TextWrapped("%s",Tr("Toggle automatic outfit changes ON/OFF. A paused system resumes when switched ON."));
+    UI::Text(Tr("Toggle auto outfits (keyboard): %s"),key.c_str());
+    if(UI::Button(Label("Change keyboard key"))) {bindingMode=9;bindingDeadline=GetTickCount64()+10000;}
+    if(UI::IsItemHovered()) UI::SetTooltip("%s",Tr("Supports Ctrl, Shift and Alt combinations. Bind a key alone to remove modifiers. Other mods may still react to the same key."));
+    UI::SameLine();
+    if(UI::Button(Label("Disable keyboard hotkey"))) {try{auto s=CurrentInputSettings();s.autoKeyboard=0;s.autoModifiers=0;SaveInputSettings(s);}catch(const std::exception& e){SetStatus(e.what());}}
+    UI::Text(Tr("Toggle auto outfits (gamepad): %s / hold %.1f s"),Tr(PadLabel(autoGamepad.load()).c_str()),autoHoldSeconds.load());
+    if(UI::Button(Label("Change gamepad button"))) {bindingMode=10;bindingDeadline=GetTickCount64()+10000;}
+    UI::SameLine();
+    if(UI::Button(Label("Disable gamepad hotkey"))) {try{auto s=CurrentInputSettings();s.autoGamepad=0;SaveInputSettings(s);}catch(const std::exception& e){SetStatus(e.what());}}
+    float seconds=autoHoldSeconds.load();
+    if(UI::SliderFloat(Label("Hold duration"),&seconds,.4f,3.f,"%.1f s")) autoHoldSeconds=seconds;
+    if(UI::IsItemDeactivatedAfterEdit()) {try{SaveInputSettings(CurrentInputSettings());}catch(const std::exception& e){SetStatus(e.what());}}
+    if(bindingMode==9 || bindingMode==10) {
+        UI::TextWrapped("%s",Tr(bindingMode==9?"Hold Ctrl, Shift or Alt and press a key, or press a key alone. Escape cancels.":"Press the new key/button. Escape or Cancel stops capture."));
+        if(UI::Button(Label("Cancel binding"))) bindingMode=0;
+    }
+    UI::TextWrapped("%s",Tr("Short gamepad presses pass through. Another mod may also react during a long press; choose an unused button if needed."));
+    UI::PopID();
 }

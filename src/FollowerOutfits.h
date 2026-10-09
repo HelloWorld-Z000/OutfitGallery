@@ -1,5 +1,6 @@
 #pragma once
 namespace Gallery {
+unsigned MaintainedFollowerCount(); // thread-safe count, no actor lookup
 void ClearFollowerOutfits();
 void SaveFollowerOutfits(SKSE::SerializationInterface*);
 bool LoadFollowerOutfit(SKSE::SerializationInterface*,std::uint32_t type,std::uint32_t version,std::uint32_t length);

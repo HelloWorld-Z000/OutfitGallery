@@ -1,5 +1,6 @@
 #include "Presets.h"
 #include "HoldButton.h"
+#include "DiagnosticSettings.h"
 #include <fstream>
 #include <iostream>
 #include <chrono>
@@ -21,6 +22,18 @@ int main() {
         if(!prefSettings.preferEnchanted) throw std::runtime_error("preference not default ON");
         {std::ofstream out(folder/"legacy-preference.json"); out<<R"({"schema":1,"distance":220,"height":65,"orbit":0,"pitch":0,"fov":60})";}
         if(!ReadStudioSettings(folder/"legacy-preference.json").preferEnchanted) throw std::runtime_error("missing preference field not default ON");
+        if(prefSettings.cleanupCompatibility || cleanupCompatibility.load() || DetailEnabled()) throw std::runtime_error("support options must default OFF");
+        if(ReadStudioSettings(folder/"legacy-preference.json").cleanupCompatibility) throw std::runtime_error("legacy settings enabled compatibility");
+        prefSettings.cleanupCompatibility=true; prefSettings.portraitThumbnails=true;
+        detailedLogging=true;
+        WriteStudioSettings(prefSettings,folder/"support.json");
+        const auto support=ReadStudioSettings(folder/"support.json");
+        if(!support.cleanupCompatibility || !support.portraitThumbnails) throw std::runtime_error("support setting did not persist");
+        {std::ifstream in(folder/"support.json"); std::string bytes((std::istreambuf_iterator<char>(in)),{});
+         if(bytes.find("detailedLogging")!=std::string::npos) throw std::runtime_error("diagnostics persisted across restart");}
+        detailedLogging=false;
+        prefSettings.cleanupCompatibility=false; WriteStudioSettings(prefSettings,folder/"support.json");
+        if(ReadStudioSettings(folder/"support.json").cleanupCompatibility) throw std::runtime_error("compatibility OFF did not persist");
         prefSettings.preferEnchanted=true; WriteStudioSettings(prefSettings,folder/"prefer.json");
         if(!ReadStudioSettings(folder/"prefer.json").preferEnchanted) throw std::runtime_error("preference not saved");
         prefSettings.preferEnchanted=false; WriteStudioSettings(prefSettings,folder/"prefer.json");
@@ -41,7 +54,15 @@ int main() {
         if(!SameEquipment(accessories,ClothingPreset(accessories)) || !ClothingPreset(accessories).accessories || ClothingPreset(accessories).slotMask!=0x60) throw std::runtime_error("Clothing filter changed accessory scope");
         for(const auto& category:std::vector<std::string>{"","favorites","#head","#legacy"}) if(CollectionFits(2,category,true)) throw std::runtime_error("Accessory photo leaked to other collections");
         if(!CollectionFits(2,"#accessories",true) || !CollectionFits(2,"#trash",true) || CollectionFits(2,"#accessories",false)) throw std::runtime_error("Accessory isolation failed");
-        auto invalidAccessories=accessories; invalidAccessories.slotMask=0; rejects(invalidAccessories);
+        if(AccessoryItemInScope(4,0,false) || AccessoryItemInScope(0,0,false) || !AccessoryItemInScope(0,0,true)) throw std::runtime_error("Slotless accessory must preserve unrelated equipment");
+        if(!AccessoryItemInScope(0x60,0x20,false) || AccessoryItemInScope(4,0x20,false) || !AccessoryItemInScope(0,0x20,true)) throw std::runtime_error("Mixed accessory scope failed");
+        {std::ofstream old(folder/"oldaccessory.json");old<<R"({"schema":3,"name":"Old","photo":"old.png","slotMask":32,"items":[{"plugin":"Jewelry.esp","localID":291,"name":"Ring","kind":"armor","hand":""}]})";}
+        if(!ReadPreset(folder/"oldaccessory.json").accessories || ReadPreset(folder/"oldaccessory.json").slotMask!=32) throw std::runtime_error("Legacy accessory changed");
+        auto invalidAccessories=accessories;
+        auto slotless=accessories;slotless.slotMask=0;
+        WritePreset(slotless,folder/"slotless.json");
+        const auto slotlessCopy=ReadPreset(folder/"slotless.json");
+        if(!slotlessCopy.accessories || slotlessCopy.slotMask || !SameEquipment(slotless,slotlessCopy)) throw std::runtime_error("Slotless accessory persistence failed");
         invalidAccessories=accessories; invalidAccessories.items[0].kind="weapon"; rejects(invalidAccessories);
         // A ring overlaps the target; body armor sharing its slot is replaced.
         // Incoming multi-slot armor must still fit; unrelated armor is outside scope.
@@ -130,6 +151,30 @@ int main() {
         auto invalid=read; invalid.labels["portrait-1.png"].categories.push_back("missing"); caught=false;
         try {WriteLibrary(invalid,folder/"library.json");}catch(const std::exception&){caught=true;}
         if(!caught || ReadLibrary(folder/"library.json").labels.at("portrait-1.png").categories.size()!=2) throw std::runtime_error("invalid library overwrote valid data");
+        {
+            InputSettings s;s.autoKeyboard=66;s.autoModifiers=1;s.autoGamepad=16;s.autoHoldSeconds=1.5f;
+            WriteInputSettings(s,folder/"auto-hotkeys.json");auto r=ReadInputSettings(folder/"auto-hotkeys.json");
+            if(r.autoKeyboard!=66 || r.autoModifiers!=1 || r.autoGamepad!=16 || r.autoHoldSeconds!=1.5f || r.keyboard!=66 || r.captureKeys!=s.captureKeys) throw std::runtime_error("auto bindings roundtrip");
+            for(unsigned mods=0;mods<8;++mods) {s.autoKeyboard=88;s.autoModifiers=mods;WriteInputSettings(s,folder/"auto-hotkeys.json");if(ReadInputSettings(folder/"auto-hotkeys.json").autoModifiers!=mods)throw std::runtime_error("auto modifiers lost");}
+            for(unsigned invalid=0;invalid<7;++invalid) {
+                auto bad=s;
+                if(invalid==0){bad.autoKeyboard=bad.keyboard;bad.autoModifiers=bad.keyboardModifiers;}
+                if(invalid==1)bad.autoGamepad=bad.gamepad;
+                if(invalid==2)bad.autoKeyboard=bad.captureKeys[0];
+                if(invalid==3)bad.autoGamepad=bad.capturePads[0];
+                if(invalid==4)bad.autoModifiers=8;
+                if(invalid==5)bad.autoHoldSeconds=0;
+                if(invalid==6)bad.autoGamepad=3;
+                bool caught=false;try{WriteInputSettings(bad,folder/"auto-hotkeys.json");}catch(const std::exception&){caught=true;}
+                if(!caught)throw std::runtime_error("invalid auto shortcut accepted");
+            }
+            {std::ofstream out(folder/"legacy-auto-hotkeys.json");out<<R"({"schema":1,"keyboard":66,"gamepad":32,"holdSeconds":0.8})";}
+            auto old=ReadInputSettings(folder/"legacy-auto-hotkeys.json");
+            if(old.autoKeyboard || old.autoModifiers || old.autoGamepad || old.autoHoldSeconds!=.8f)throw std::runtime_error("legacy shortcuts not disabled");
+            s.autoKeyboard=0;s.autoModifiers=0;s.autoGamepad=0;
+            WriteInputSettings(s,folder/"auto-hotkeys.json");r=ReadInputSettings(folder/"auto-hotkeys.json");
+            if(r.autoKeyboard || r.autoGamepad)throw std::runtime_error("auto shortcuts cannot disable");
+        }
         WriteInputSettings({65,128,1.2f},folder/"hotkeys.json");
         auto keys=ReadInputSettings(folder/"hotkeys.json");
         if(keys.keyboard!=65 || keys.gamepad!=128 || keys.holdSeconds!=1.2f) throw std::runtime_error("hotkeys roundtrip failed");
@@ -144,6 +189,17 @@ int main() {
         if(!reservedRejected) throw std::runtime_error("Navigation capture conflict allowed");
         {std::ofstream out(folder/"old-keys.json");out<<R"({"schema":1,"keyboard":66,"gamepad":64,"holdSeconds":0.8})";}
         if(ReadInputSettings(folder/"old-keys.json").capturePads[2]!=0) throw std::runtime_error("Old menu binding migration conflict");
+        if(ReadInputSettings(folder/"old-keys.json").keyboardModifiers!=0) throw std::runtime_error("Legacy modifiers changed");
+        for(unsigned modifiers=0;modifiers<8;++modifiers) {
+            InputSettings chord; chord.keyboardModifiers=modifiers;
+            WriteInputSettings(chord,folder/"chord.json");const auto loaded=ReadInputSettings(folder/"chord.json");
+            if(loaded.keyboardModifiers!=modifiers || loaded.keyboard!=chord.keyboard || loaded.captureKeys!=chord.captureKeys) throw std::runtime_error("Chord settings lost");
+        }
+        for(const auto* bad:{"-1","8","true","1.5","4294967296"}) {
+            {std::ofstream out(folder/"invalid-chord.json");out<<"{\"schema\":1,\"keyboard\":66,\"gamepad\":0,\"holdSeconds\":0.8,\"keyboardModifiers\":"<<bad<<"}";}
+            bool rejected=false;try{(void)ReadInputSettings(folder/"invalid-chord.json");}catch(const std::exception&){rejected=true;}
+            if(!rejected) throw std::runtime_error("Invalid chord accepted");
+        }
         auto closeCamera=StudioSettings{};closeCamera.distance=10;WriteStudioSettings(closeCamera,folder/"close-camera.json");
         if(ReadStudioSettings(folder/"close-camera.json").distance!=10) throw std::runtime_error("Close camera not persisted");
         settings.fov=60; settings.language=0; WriteStudioSettings(settings,folder/"settings.json");
@@ -152,6 +208,11 @@ int main() {
         if(ReadStudioSettings(folder/"settings.json").language!=1) throw std::runtime_error("Japanese preference lost");
         settings.language=2; WriteStudioSettings(settings,folder/"settings.json");
         if(ReadStudioSettings(folder/"settings.json").language!=2) throw std::runtime_error("External language preference lost");
+        if(StudioSettings{}.allowCombatGallery || ReadStudioSettings(folder/"legacy-preference.json").allowCombatGallery) throw std::runtime_error("combat entry must default OFF");
+        settings.allowCombatGallery=true;WriteStudioSettings(settings,folder/"combat-entry.json");
+        if(!ReadStudioSettings(folder/"combat-entry.json").allowCombatGallery) throw std::runtime_error("combat entry ON lost");
+        settings.allowCombatGallery=false;WriteStudioSettings(settings,folder/"combat-entry.json");
+        if(ReadStudioSettings(folder/"combat-entry.json").allowCombatGallery) throw std::runtime_error("combat entry OFF lost");
         settings.allowFreeCamera=true; WriteStudioSettings(settings,folder/"settings.json");
         if(!ReadStudioSettings(folder/"settings.json").allowFreeCamera) throw std::runtime_error("free camera preference lost");
         settings.addMissing=true; WriteStudioSettings(settings,folder/"settings.json");
@@ -160,6 +221,11 @@ int main() {
         if(ReadStudioSettings(folder/"settings.json").addMissing) throw std::runtime_error("add missing disabled preference lost");
         {std::ofstream out(folder/"legacy-settings.json"); out << R"({"schema":1,"distance":220,"height":65,"orbit":0,"pitch":0,"fov":60})";}
         if(!ReadStudioSettings(folder/"legacy-settings.json").addMissing) throw std::runtime_error("missing addMissing setting should default to enabled");
+        if(ReadStudioSettings(folder/"legacy-settings.json").portraitThumbnails) throw std::runtime_error("legacy thumbnail mode changed");
+        settings.portraitThumbnails=true; WriteStudioSettings(settings,folder/"portrait.json");
+        if(!ReadStudioSettings(folder/"portrait.json").portraitThumbnails) throw std::runtime_error("portrait mode lost");
+        settings.portraitThumbnails=false; WriteStudioSettings(settings,folder/"portrait.json");
+        if(ReadStudioSettings(folder/"portrait.json").portraitThumbnails) throw std::runtime_error("normal mode lost");
         CameraBank bank{}; bank[0]=settings; bank[6]=settings; bank[6]->height=140;
         settings.lateral=42; settings.elevation=-35;
         WriteStudioSettings(settings,folder/"settings.json");
@@ -185,6 +251,20 @@ int main() {
         independent.items[0].hand="left";
         if(SameEquipment(p,independent)) throw std::runtime_error("equipment comparison missed wrong hand");
         // The library owns the editable scope, never the original preset file.
+        Preset mixed{"Mixed","mixed.png",{{"Gear.esp",1,"Clothes","armor",""},{"Gear.esp",2,"Slotless ring","armor",""},{"Gear.esp",3,"Other slotless","armor",""}},4,true};
+        mixed.exchangeSlots=0;mixed.exchangeSlotless={ExchangeItemKey(mixed.items[1])};
+        const auto onlyRing=FilterExchangeSlots(mixed,{4,0,0});
+        if(!onlyRing.accessories || onlyRing.slotMask || onlyRing.items.size()!=1 || onlyRing.items[0].localID!=2) throw std::runtime_error("Slotless-only selection lost or became full outfit");
+        if(AccessoryItemInScope(4,onlyRing.slotMask,false) || AccessoryItemInScope(0,onlyRing.slotMask,false)) throw std::runtime_error("Unselected equipment targeted");
+        mixed.exchangeSlots=4;
+        if(FilterExchangeSlots(mixed,{4,0,0}).items.size()!=2) throw std::runtime_error("Mixed slot and item selection failed");
+        mixed.exchangeSlots=0;mixed.exchangeSlotless.clear();
+        if(!FilterExchangeSlots(mixed,{4,0,0}).items.empty()) throw std::runtime_error("Clear all must stay empty");
+        Library selectedItems;selectedItems.labels["mixed.png"].exchangeSlots=0;
+        selectedItems.labels["mixed.png"].exchangeSlotless={"Gear.esp:2"};
+        WriteLibrary(selectedItems,folder/"selected-items.json");
+        const auto selectedRead=ReadLibrary(folder/"selected-items.json");
+        if(selectedRead.labels.at("mixed.png").exchangeSlots!=0 || selectedRead.labels.at("mixed.png").exchangeSlotless!=std::vector<std::string>{"Gear.esp:2"}) throw std::runtime_error("Slotless selection persistence failed");
         Library scopes; scopes.labels["portrait-1.png"].exchangeSlots=0;
         WriteLibrary(scopes,folder/"scopes.json");
         auto scopeLoaded=ReadLibrary(folder/"scopes.json");
@@ -225,9 +305,48 @@ int main() {
         caught=false; try {DeleteTrashedFiles("trash.png",trashLib,deletionRoot);}catch(const std::exception&){caught=true;}
         if(!caught || !std::filesystem::exists(deletionRoot/"Presets"/"record.json")) throw std::runtime_error("non-trash deletion permitted");
         trashLib.labels["trash.png"].deleted=true;
+        const auto originFile=deletionRoot/"Presets/EditOriginals/record.json.original";
+        const auto historyFile=deletionRoot/"Presets/EditBackups/record.json.123-1.bak";
+        const auto keepHistory=deletionRoot/"Presets/EditBackups/keep.json.123-1.bak";
+        WritePreset(keepPreset,originFile);
+        WritePreset(trashPreset,historyFile);
+        WritePreset(keepPreset,keepHistory);
+        caught=false;try{DeleteTrashedFiles("trash.png",trashLib,deletionRoot);}catch(const std::exception&){caught=true;}
+        if(!caught || !std::filesystem::exists(historyFile) || !std::filesystem::exists(deletionRoot/"Presets/record.json"))throw std::runtime_error("mismatched origin must reject before deleting anything");
+        WritePreset(trashPreset,originFile);
         DeleteTrashedFiles("trash.png",trashLib,deletionRoot);
+        if(std::filesystem::exists(originFile) || std::filesystem::exists(historyFile) || !std::filesystem::exists(keepHistory))throw std::runtime_error("edit record cleanup did not isolate deleted preset");
         if(!std::filesystem::exists(deletionRoot/"Presets"/"keep.json") || !std::filesystem::exists(deletionRoot/"Captures"/"keep.png")) throw std::runtime_error("unrelated files removed");
         if(std::filesystem::exists(deletionRoot/"Captures"/"trash.png") || std::filesystem::exists(deletionRoot/"Presets"/"record.json")) throw std::runtime_error("trash files not removed");
+        WritePreset(trashPreset,deletionRoot/"Presets"/"record.json");
+        {std::ofstream out(deletionRoot/"Captures"/"trash.png"); out<<"image";}
+        std::vector<std::string> trace;
+        const DeletionTrace collect=[&](const std::string& line){trace.push_back(line);};
+        const auto hasTrace=[&](const std::string& text){for(const auto& line:trace) if(line.find(text)!=std::string::npos) return true; return false;};
+        {std::ofstream out(deletionRoot/"Presets"/"unrelated-broken.json"); out<<"{";}
+        caught=false;
+        try {DeleteTrashedFiles("trash.png",trashLib,deletionRoot,collect);}catch(const std::exception&){caught=true;}
+        if(!caught || !hasTrace("read_preset") || !hasTrace("unrelated-broken.json") || !hasTrace("failed") || !std::filesystem::exists(deletionRoot/"Captures"/"trash.png")) throw std::runtime_error("failed read not diagnosed before deletion");
+        std::filesystem::remove(deletionRoot/"Presets"/"unrelated-broken.json");
+        trace.clear();
+        DeleteTrashedFiles("trash.png",trashLib,deletionRoot,collect);
+        if(!hasTrace("remove_result") || !hasTrace("actual_parent") || !hasTrace("complete") || !hasTrace("handle_path") || !hasTrace("\"removed\":true")) throw std::runtime_error("deletion trace missing result or path evidence");
+        if(std::filesystem::exists(deletionRoot/"Captures"/"trash.png") || std::filesystem::exists(deletionRoot/"Presets"/"record.json") || !std::filesystem::exists(deletionRoot/"Presets"/"keep.json")) throw std::runtime_error("traced deletion changed scope");
+        // A broken logging sink must never prevent or broaden normal deletion.
+        WritePreset(trashPreset,deletionRoot/"Presets"/"record.json");
+        {std::ofstream out(deletionRoot/"Captures"/"trash.png"); out<<"image";}
+        DeleteTrashedFiles("trash.png",trashLib,deletionRoot,[](const std::string&){throw std::runtime_error("diagnostic sink failed");});
+        if(std::filesystem::exists(deletionRoot/"Captures"/"trash.png")) throw std::runtime_error("logging sink blocked deletion");
+        // Non-regular targets still fail, with a specific stage in the trace.
+        std::filesystem::create_directory(deletionRoot/"Captures"/"trash.png");
+        trace.clear(); caught=false;
+        try {DeleteTrashedFiles("trash.png",trashLib,deletionRoot,collect);}catch(const std::exception&){caught=true;}
+        if(!caught || !hasTrace("regular_file_check") || !std::filesystem::is_directory(deletionRoot/"Captures"/"trash.png")) throw std::runtime_error("directory deletion guard changed");
+        std::filesystem::remove(deletionRoot/"Captures"/"trash.png");
+        trashLib.labels["trash.png"].deleted=false;
+        trace.clear(); caught=false;
+        try {DeleteTrashedFiles("trash.png",trashLib,deletionRoot,collect);}catch(const std::exception&){caught=true;}
+        if(!caught || !hasTrace("library") || !hasTrace("failed")) throw std::runtime_error("non-trash trace missing");
         trashLib.labels["../outside.png"].deleted=true; caught=false;
         try {DeleteTrashedFiles("../outside.png",trashLib,deletionRoot);}catch(const std::exception&){caught=true;}
         if(!caught) throw std::runtime_error("trash traversal accepted");

@@ -69,6 +69,9 @@ void Maintain() {
     }
 }
 }
+unsigned MaintainedFollowerCount() {
+    std::scoped_lock lock(stateMutex); return static_cast<unsigned>(outfits.size());
+}
 void ClearFollowerOutfits() {
     nextPoll=0;
     std::scoped_lock lock(stateMutex); outfits.clear(); hasOutfits=false;

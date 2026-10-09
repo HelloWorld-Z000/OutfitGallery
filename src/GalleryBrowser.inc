@@ -1,12 +1,23 @@
 // Included inside Gallery; UI-owned state is only changed on the render thread.
 Library library;
 bool libraryWritable=true;
+unsigned libraryRevision{};
+MissingPresetCounts missingCounts;
+void UpdateMissingCounts() {
+    static unsigned lastLibrary=~0u,lastPresets=~0u,lastResult=~0u;
+    if(lastLibrary==libraryRevision && lastPresets==presetRevision.load() && lastResult==missingOrderSerial) return;
+    std::scoped_lock lock(presetsMutex);
+    missingCounts=CountMissingPresets(presets,missingResults,[](const std::string& photo) {
+        const auto it=library.labels.find(photo); return it!=library.labels.end() && it->second.deleted;
+    });
+    lastLibrary=libraryRevision; lastPresets=presetRevision.load(); lastResult=missingOrderSerial;
+}
 
 const std::filesystem::path libraryFile="Data/SKSE/Plugins/OutfitGallery/Library.json";
 
 bool CommitLibrary(Library next) {
     if(!libraryWritable) { SetStatus("Library could not be read. Restore Library.json before editing."); return false; }
-    try { WriteLibrary(next,libraryFile); library=std::move(next); return true; }
+    try { WriteLibrary(next,libraryFile); library=std::move(next); ++libraryRevision; return true; }
     catch(const std::exception& e) { SetStatus(e.what()); return false; }
 }
 
@@ -16,8 +27,10 @@ void RenderBrowser(bool& addMissing) {
     static bool newCategory{};
     static std::vector<std::string> deletePhotos;
     bool openDelete=false, openScope=false;
+    std::string moveMissingToTrash;
     static Preset scopeEditing;
     static std::uint32_t scopeDraft{};
+    static std::vector<std::string> scopeSlotless;
     static bool scopeDraftInitialized{};
 
     static std::vector<std::string> loaded;
@@ -25,7 +38,8 @@ void RenderBrowser(bool& addMissing) {
     static bool tabsFocused{}, columnsFocused{};
     static unsigned lastOpen{};
     if(lastOpen!=studioOpenSerial.load()) {
-        lastOpen=studioOpenSerial.load(); tabsFocused=false; columnsFocused=false; selected.clear(); oldFilter.clear(); search[0]=0;
+        SetMissingCheckMode(false);
+        lastOpen=studioOpenSerial.load(); tabsFocused=false; columnsFocused=false; layoutButtonFocused=false; missingCheckFocused=false; selected.clear(); oldFilter.clear(); search[0]=0;
         category=ResolveStartupTab(startupTab,library);
         UI::ClearActiveID();
     }
@@ -33,7 +47,7 @@ void RenderBrowser(bool& addMissing) {
     {std::scoped_lock lock(presetsMutex); reveal=std::move(revealAfterSave); revealAfterSave.reset();}
     if(reveal) {
         category=reveal->accessories?"#accessories":reveal->slotMask?"#head":"";
-        selected=reveal->photo; search[0]=0; oldFilter.clear(); tabsFocused=false; columnsFocused=false;
+        selected=reveal->photo; search[0]=0; oldFilter.clear(); tabsFocused=false; columnsFocused=false; layoutButtonFocused=false; missingCheckFocused=false;
         UI::ClearActiveID();
     }
     bool openEdit=false, openTab=false;
@@ -44,10 +58,16 @@ void RenderBrowser(bool& addMissing) {
             if(UI::Selectable("External (Translation.json)",language==2)) {language=2; settingsChangedAt=GetTickCount64();}
             UI::EndCombo();
         }
-        RenderHotkeys();
-        bool followers=followerTargeting.load();
-        if(UI::Checkbox(Label("Select follower under crosshair (experimental)"),&followers)) {followerTargeting=followers; settingsChangedAt=GetTickCount64();}
-        if(followers) UI::TextWrapped(Tr("Close the gallery, aim at a current humanoid follower and press the opening hotkey. Look away to select yourself. Target is fixed until close."));
+        if(UI::CollapsingHeader(Label("Capture keys"))) { RenderHotkeys(); }
+        bool combatEntry=allowCombatGallery.load();
+        if(UI::Checkbox(Label("Allow opening Gallery during combat (experimental)"),&combatEntry)) {
+            allowCombatGallery=combatEntry;settingsChangedAt=GetTickCount64();
+            SKSE::log::info("OG-STUDIO combat entry option={}",combatEntry);
+        }
+        if(UI::IsItemHovered()) UI::SetTooltip("%s",Tr("Player only. Combat may continue while Gallery is open. Killmoves, stagger and target lock remain blocked."));
+        bool freeEntry=allowFreeCamera.load();
+        if(UI::Checkbox(Label("Allow opening from free camera (experimental)"),&freeEntry)) {allowFreeCamera=freeEntry; settingsChangedAt=GetTickCount64();}
+        UI::Separator();
         bool preview=detachedPreview.load();
         UI::BeginDisabled(saveBusy);
         if(UI::Checkbox(Label("Independent preview"),&preview)) {
@@ -59,6 +79,16 @@ void RenderBrowser(bool& addMissing) {
             if(UI::Button(Label("Reset preview position"))) {previewRect={.54f,.08f,.45f,.84f}; resetPreviewRect=true; settingsChangedAt=GetTickCount64();}
         }
         UI::EndDisabled();
+        bool changed=UI::Checkbox(Label("Show preset names"),&showNames);
+        changed=UI::Checkbox(Label("Show item counts"),&showCounts)||changed;
+        if(changed) settingsChangedAt=GetTickCount64();
+        if(UI::Checkbox(Label("Add missing base items (new game)"),&addMissing)) { SaveSettingsIfDue(true); }
+        if(UI::IsItemHovered()) UI::SetTooltip("%s",Tr("Generated items use base properties; custom enchantments are not recreated."));
+        bool prefer=preferEnchanted.load();
+        if(UI::Checkbox(Label("Prefer registered enchanted items"),&prefer)) {preferEnchanted=prefer; SaveSettingsIfDue(true);}
+        if(UI::IsItemHovered()) UI::SetTooltip("%s",Tr("Player only. Uses owned registered enchanted items; otherwise uses normal equipment and notifies you. Applies on the next outfit change. Re-register older sets to record enchantments."));
+        UI::Separator();
+        if(UI::SliderInt(Label("Normal-view columns"),&gridColumns,2,5)) settingsChangedAt=GetTickCount64();
         std::vector<Category> openingTabs{{"","All"}};
         openingTabs.insert(openingTabs.end(),library.categories.begin(),library.categories.end());
         openingTabs.push_back({"#head","Head equipment"});
@@ -76,6 +106,14 @@ void RenderBrowser(bool& addMissing) {
             UI::EndCombo();
         }
         if(UI::IsItemHovered()) UI::SetTooltip("%s",Tr("Choose the tab shown when opening the gallery. Registration still opens the matching tab."));
+        if(UI::Button(Label("+ Tab"))) {newCategory=true; tabName[0]=0; openTab=true;}
+        UI::SameLine();
+        UI::BeginDisabled(category.empty() || category.starts_with("#"));
+        if(UI::Button(Label("Edit tab"))) {
+            auto it=std::find_if(library.categories.begin(),library.categories.end(),[&](const auto& c){return c.id==category;});
+            if(it!=library.categories.end()) {newCategory=false; editCategory=category; strcpy_s(tabName,it->name.c_str()); openTab=true;}
+        }
+        UI::EndDisabled();
         if(UI::CollapsingHeader(Label("Head equipment slots"))) {
             auto mask=partialSlots.load();
             const unsigned slots[]{30,31,41,42};
@@ -89,25 +127,54 @@ void RenderBrowser(bool& addMissing) {
             }
             UI::TextWrapped(Tr("Head capture uses these slots. Saved photos keep their own scope."));
         }
-        bool changed=UI::Checkbox(Label("Show preset names"),&showNames);
-        changed=UI::Checkbox(Label("Show item counts"),&showCounts)||changed;
-        changed=UI::SliderInt(Label("Columns"),&gridColumns,2,5)||changed;
-        if(changed) settingsChangedAt=GetTickCount64();
-        if(UI::Button(Label("+ Tab"))) {newCategory=true; tabName[0]=0; openTab=true;}
-        UI::SameLine();
-        UI::BeginDisabled(category.empty() || category.starts_with("#"));
-        if(UI::Button(Label("Edit tab"))) {
-            auto it=std::find_if(library.categories.begin(),library.categories.end(),[&](const auto& c){return c.id==category;});
-            if(it!=library.categories.end()) {newCategory=false; editCategory=category; strcpy_s(tabName,it->name.c_str()); openTab=true;}
+        UI::Separator();
+        UI::BeginDisabled(saveBusy || verificationTicks.load()!=0);
+        bool compatibility=cleanupCompatibility.load();
+        if(UI::Checkbox(Label("Equipment cleanup compatibility (experimental)"),&compatibility)) {
+            cleanupCompatibility=compatibility; ResetTransferObservations(); SaveSettingsIfDue(true);
+            SKSE::log::info("Cleanup compatibility changed: {} (applies to future outfit changes)",compatibility);
         }
         UI::EndDisabled();
-        if(UI::Checkbox(Label("Add missing base items (new game)"),&addMissing)) { SaveSettingsIfDue(true); }
-        UI::TextWrapped("%s",Tr("Generated items use base properties; custom enchantments are not recreated."));
-        bool prefer=preferEnchanted.load();
-        if(UI::Checkbox(Label("Prefer registered enchanted items"),&prefer)) {preferEnchanted=prefer; SaveSettingsIfDue(true);}
-        UI::TextWrapped("%s",Tr("Player only. Uses owned registered enchanted items; otherwise uses normal equipment and notifies you. Applies on the next outfit change. Re-register older sets to record enchantments."));
+        if(UI::IsItemHovered()) UI::SetTooltip("%s",Tr("Leave OFF for normal use. Tries additional tracking for newly generated items with existing IDs. Does not clean up old leftovers or bypass item protection."));
+        bool diagnostics=DetailEnabled();
+        if(UI::Checkbox(Label("Record detailed diagnostic log"),&diagnostics)) {
+            detailedLogging=diagnostics;
+            ResetTransferObservations();
+            SKSE::log::info("OG-DIAG session {} build=1.0.13 compatibility={}",diagnostics?"enabled":"disabled",cleanupCompatibility.load());
+        }
+        if(UI::IsItemHovered()) UI::SetTooltip("%s",Tr("Records outfit cleanup and Trash deletion details in OutfitGallery.log. Turns OFF when the game restarts. Logging does not change deletion behavior."));
+        if(diagnostics) {
+            UI::TextWrapped("%s",Tr("Detailed logging ON: reproduce the issue once, then send OutfitGallery.log before restarting the game."));
+            if(UI::Button(Label("Show log location"))) {
+                if(const auto path=SKSE::log::log_directory()) SetStatus("OutfitGallery.log: "+(path.value()/"OutfitGallery.log").string());
+            }
+        }
+
     }
+    ReceiveMissingCheck();
+    if(missingCheckMode) UpdateMissingCounts();
+    const auto* searchStyle=UI::GetStyle();
+    const float checkWidth=UI::GetFrameHeight()+searchStyle->ItemInnerSpacing.x+UI::CalcTextSize(Tr("Check missing gear")).x;
+    const float searchGap=std::max(searchStyle->ItemSpacing.x*2.f,UI::GetFontSize()*.65f);
+    const float checkX=UI::GetCursorPosX()+UI::GetContentRegionAvail().x-checkWidth;
+    UI::SetNextItemWidth(std::max(32.f,checkX-searchGap-UI::CalcTextSize(Tr("Search outfits")).x-searchStyle->ItemInnerSpacing.x-UI::GetCursorPosX()));
     UI::InputText(Label("Search outfits"),search,sizeof(search));
+    UI::SameLine(); UI::SetCursorPosX(checkX);
+    UI::BeginDisabled(saveBusy);
+    bool requestedCheck=missingCheckMode;
+    if(UI::Checkbox(Label("Check missing gear"),&requestedCheck)) SetMissingCheckMode(requestedCheck);
+    if(missingCheckFocused) UI::ImDrawListManager::AddRect(UI::GetWindowDrawList(),UI::GetItemRectMin(),UI::GetItemRectMax(),0xFF30C8FF,0,0,3.f);
+    if(UI::IsItemHovered()) UI::SetTooltip("%s",Tr("Marks outfits with missing parts, for example after removing a mod, with an X. Right-click a photo for details."));
+    UI::EndDisabled();
+    if(missingCheckMode) {
+        if(missingCheckPending) UI::TextColored({1.f,.8f,.35f,1.f},"%s",Tr("Missing-data check mode: checking..."));
+        else if(!missingCheckError.empty()) {
+            UI::TextColored({1.f,.5f,.4f,1.f},"%s",Tr("Missing-data check mode: check failed; no sets were flagged."));
+            UI::TextWrapped("%s",missingCheckError.c_str());
+        } else {
+            UI::TextColored({1.f,.8f,.35f,1.f},Tr("Missing-data check mode: %u sets / %u in Trash"),missingCounts.active,missingCounts.trash);
+        }
+    }
 
     const bool modal=UI::IsPopupOpen(nullptr,UI::ImGuiPopupFlags_AnyPopupId);
     const bool padIntent=framePadEdges || framePadRepeat;
@@ -130,17 +197,23 @@ void RenderBrowser(bool& addMissing) {
         auto it=std::find_if(tabs.begin(),tabs.end(),[&](const auto& c){return c.id==category;});
         int idx=it==tabs.end()?0:static_cast<int>(it-tabs.begin());
         if(tabsFocused && (left || right)) {
-            int target=columnsFocused?static_cast<int>(tabs.size()):idx;
-            target=(target+(right?1:-1)+static_cast<int>(tabs.size())+1)%(static_cast<int>(tabs.size())+1);
+            int target=missingCheckFocused?static_cast<int>(tabs.size())+2:layoutButtonFocused?static_cast<int>(tabs.size())+1:columnsFocused?static_cast<int>(tabs.size()):idx;
+            target=(target+(right?1:-1)+static_cast<int>(tabs.size())+3)%(static_cast<int>(tabs.size())+3);
             columnsFocused=target==static_cast<int>(tabs.size());
-            if(!columnsFocused) {idx=target; tabChanged=true;}
+            layoutButtonFocused=target==static_cast<int>(tabs.size())+1;
+            missingCheckFocused=target==static_cast<int>(tabs.size())+2;
+            if(!columnsFocused && !layoutButtonFocused && !missingCheckFocused) {idx=target; tabChanged=true;}
         }
-        if(PadPressed(UI::ImGuiKey_GamepadL1,false)) {idx=(idx+static_cast<int>(tabs.size())-1)%static_cast<int>(tabs.size()); tabsFocused=true; columnsFocused=false; tabChanged=true;}
-        if(PadPressed(UI::ImGuiKey_GamepadR1,false)) {idx=(idx+1)%static_cast<int>(tabs.size()); tabsFocused=true; columnsFocused=false; tabChanged=true;}
+        if(PadPressed(UI::ImGuiKey_GamepadL1,false)) {idx=(idx+static_cast<int>(tabs.size())-1)%static_cast<int>(tabs.size()); tabsFocused=true; columnsFocused=false; layoutButtonFocused=false; missingCheckFocused=false; tabChanged=true;}
+        if(PadPressed(UI::ImGuiKey_GamepadR1,false)) {idx=(idx+1)%static_cast<int>(tabs.size()); tabsFocused=true; columnsFocused=false; layoutButtonFocused=false; missingCheckFocused=false; tabChanged=true;}
         category=tabs[idx].id;
-        if(PadPressed(UI::ImGuiKey_GamepadL2,false)) {category="#head";tabsFocused=true;columnsFocused=false;tabChanged=true;}
-        if(PadPressed(UI::ImGuiKey_GamepadR2,false)) {category="#accessories";tabsFocused=true;columnsFocused=false;tabChanged=true;}
+        if(PadPressed(UI::ImGuiKey_GamepadL2,false)) {category="#head";tabsFocused=true;columnsFocused=false; layoutButtonFocused=false; missingCheckFocused=false;tabChanged=true;}
+        if(PadPressed(UI::ImGuiKey_GamepadR2,false)) {category="#accessories";tabsFocused=true;columnsFocused=false; layoutButtonFocused=false; missingCheckFocused=false;tabChanged=true;}
     }
+    if(browse && tabsFocused && layoutButtonFocused && PadPressed(UI::ImGuiKey_GamepadFaceDown,false)) {
+        portraitThumbnails=!portraitThumbnails; thumbnailModeChanged=true; SaveSettingsIfDue(true);
+    }
+    if(browse && tabsFocused && missingCheckFocused && PadPressed(UI::ImGuiKey_GamepadFaceDown,false)) SetMissingCheckMode(!missingCheckMode);
     const auto* style=UI::GetStyle();
     const float tabHeight=UI::GetTextLineHeightWithSpacing();
     const auto categoryWidth=[&](const auto& c) {
@@ -160,7 +233,7 @@ void RenderBrowser(bool& addMissing) {
         UI::PushStyleColor(UI::ImGuiCol_Header,{.42f,.29f,.07f,1.f});
         UI::PushStyleColor(UI::ImGuiCol_HeaderHovered,{.55f,.38f,.10f,1.f});
         UI::PushStyleColor(UI::ImGuiCol_HeaderActive,{.65f,.46f,.12f,1.f});
-        if(UI::Selectable((icon?"##icon"+c.id:CategoryTitle(c)+"##tab"+c.id).c_str(),category==c.id,0,{tabWidth,tabHeight})) {category=c.id; tabsFocused=true; columnsFocused=false; tabChanged=true;}
+        if(UI::Selectable((icon?"##icon"+c.id:CategoryTitle(c)+"##tab"+c.id).c_str(),category==c.id,0,{tabWidth,tabHeight})) {category=c.id; tabsFocused=true; columnsFocused=false; layoutButtonFocused=false; missingCheckFocused=false; tabChanged=true;}
         UI::PopStyleColor(3);
         if(category==c.id) {
             const auto a=UI::GetItemRectMin(), b=UI::GetItemRectMax(); auto* draw=UI::GetWindowDrawList();
@@ -215,7 +288,7 @@ void RenderBrowser(bool& addMissing) {
                     const std::string photo(static_cast<const char*>(payload->Data));
                     auto next=library; auto& label=next.labels[photo];
                     if(c.id=="#trash") {label.deleted=true; CommitLibrary(std::move(next));}
-                    else if(!label.deleted && [&]{std::scoped_lock lock(presetsMutex); return std::any_of(presets.begin(),presets.end(),[&](const auto& p){return p.photo==photo && !p.slotMask;});}()) {if(std::find(label.categories.begin(),label.categories.end(),c.id)==label.categories.end()) label.categories.push_back(c.id); CommitLibrary(std::move(next));}
+                    else if(!label.deleted && [&]{std::scoped_lock lock(presetsMutex); return std::any_of(presets.begin(),presets.end(),[&](const auto& p){return p.photo==photo && !p.slotMask && !p.accessories;});}()) {if(std::find(label.categories.begin(),label.categories.end(),c.id)==label.categories.end()) label.categories.push_back(c.id); CommitLibrary(std::move(next));}
                 }
             }
             UI::EndDragDropTarget();
@@ -233,17 +306,8 @@ void RenderBrowser(bool& addMissing) {
         UI::ImDrawListManager::AddRect(UI::GetWindowDrawList(),UI::GetItemRectMin(),UI::GetItemRectMax(),0xFF30C8FF,0,0,3.f);
         if(left || right) UI::SetScrollHereX(.5f);
     }
-    {
-        const auto a=UI::GetItemRectMin(), b=UI::GetItemRectMax();
-        const float side=tabHeight*.28f, gap=tabHeight*.12f;
-        const float x=(a.x+b.x)*.5f-side-gap*.5f, y=(a.y+b.y)*.5f-side-gap*.5f;
-        auto* draw=UI::GetWindowDrawList();
-        for(int row=0;row<2;++row) for(int col=0;col<2;++col) {
-            const UI::ImVec2 p{x+col*(side+gap),y+row*(side+gap)};
-            UI::ImDrawListManager::AddRectFilled(draw,p,{p.x+side,p.y+side},0xFFE0E0E0,0,0);
-        }
-    }
-    if(UI::IsItemHovered()) UI::SetTooltip(Tr("Columns: %d (click to cycle)"),gridColumns);
+    DrawColumnCountIcon(tabHeight);
+    if(UI::IsItemHovered()) UI::SetTooltip(Tr("Columns: %d (click to cycle)"),ThumbnailColumns(gridColumns,portraitThumbnails));
     UI::EndChild();
     std::vector<Preset> cards;
     {std::scoped_lock lock(presetsMutex); cards=presets;}
@@ -265,37 +329,41 @@ void RenderBrowser(bool& addMissing) {
         if(!category.empty() && !category.starts_with("#") && (it==library.labels.end() || std::find(it->second.categories.begin(),it->second.categories.end(),category)==it->second.categories.end())) return true;
         return search[0] && p.name.find(search)==std::string::npos;
     });
+    if(missingCheckMode && !missingCheckPending && missingCheckError.empty()) MissingPresetsFirst(cards,missingResults);
     if(cards.empty()) {tabsFocused=true; selected.clear();}
-    const auto filter=category+"|"+search+"|"+std::to_string(gridColumns)+std::to_string(showNames)+std::to_string(showCounts);
+    const int displayColumns=ThumbnailColumns(gridColumns,portraitThumbnails);
+    const bool modeChanged=thumbnailModeChanged; thumbnailModeChanged=false;
+    const auto filter=category+"|"+search+"|"+std::to_string(gridColumns)+std::to_string(showNames)+std::to_string(showCounts)+"|missing="+std::to_string(missingOrderSerial);
     const bool reset=filter!=oldFilter; oldFilter=filter;
     int index=0;
     auto chosen=std::find_if(cards.begin(),cards.end(),[&](const auto& p){return p.photo==selected;});
     if(chosen!=cards.end() && !tabChanged) index=static_cast<int>(chosen-cards.begin());
     const int before=index;
-    bool moved=reveal.has_value();
+    bool moved=reveal.has_value() || modeChanged;
     bool enteredPhotos=false;
-    if(browse && !cards.empty() && tabsFocused && (down || (!columnsFocused && PadPressed(UI::ImGuiKey_GamepadFaceDown,false)))) {tabsFocused=false; columnsFocused=false; index=0; moved=true; enteredPhotos=true;}
+    if(browse && !cards.empty() && tabsFocused && (down || (!columnsFocused && !layoutButtonFocused && !missingCheckFocused && PadPressed(UI::ImGuiKey_GamepadFaceDown,false)))) {tabsFocused=false; columnsFocused=false; layoutButtonFocused=false; missingCheckFocused=false; index=0; moved=true; enteredPhotos=true;}
     if(browse && !cards.empty() && !tabsFocused && !enteredPhotos && !tabChanged) {
-        if(down) {index+=gridColumns; moved=true;}
-        if(up) {if(index<gridColumns) tabsFocused=true; else index-=gridColumns; moved=true;}
+        if(down) {index+=displayColumns; moved=true;}
+        if(up) {if(index<displayColumns) tabsFocused=true; else index-=displayColumns; moved=true;}
         if(left) {--index; moved=true;}
         if(right) {++index; moved=true;}
 
 
         index=std::clamp(index,0,static_cast<int>(cards.size())-1);
     }
-    if(!cards.empty()) selected=cards[index].photo;
+    if(!cards.empty()) {selected=cards[index].photo; if(autoPanel) autoSelectedPhoto=selected;}
     auto queueApply=[&](const Preset& p){
         if(saveBusy || category=="#trash") return;
+        if(autoPanel) {autoSelectedPhoto=p.photo; return;}
         std::scoped_lock lock(presetsMutex); requestedPreset=p;
-        {const auto label=library.labels.find(p.photo); if(label!=library.labels.end()) requestedPreset.exchangeSlots=label->second.exchangeSlots;}
+        {const auto label=library.labels.find(p.photo); if(label!=library.labels.end()) {requestedPreset.exchangeSlots=label->second.exchangeSlots;requestedPreset.exchangeSlotless=label->second.exchangeSlotless;}}
         requestedAddMissing=addMissing; command=4;
     };
     if(browse && !cards.empty() && !tabsFocused && !enteredPhotos) {
         if(PadPressed(UI::ImGuiKey_GamepadFaceDown,false)) queueApply(cards[index]);
         if(PadPressed(UI::ImGuiKey_GamepadR3,false)) {contextPhoto=cards[index].photo; strcpy_s(editName,cards[index].name.c_str()); openEdit=true;}
     }
-    if(browse && tabsFocused && !columnsFocused && PadPressed(UI::ImGuiKey_GamepadR3,false) && !category.empty() && !category.starts_with("#")) {
+    if(browse && tabsFocused && !columnsFocused && !layoutButtonFocused && !missingCheckFocused && PadPressed(UI::ImGuiKey_GamepadR3,false) && !category.empty() && !category.starts_with("#")) {
         auto it=std::find_if(library.categories.begin(),library.categories.end(),[&](const auto& c){return c.id==category;});
         if(it!=library.categories.end()) {newCategory=false; editCategory=category; strcpy_s(tabName,it->name.c_str()); openTab=true;}
     }
@@ -318,16 +386,18 @@ void RenderBrowser(bool& addMissing) {
     // narrows the thumbnails, making them shorter and hiding it again next frame.
     UI::BeginChild("Presets",{0,std::max(80.f,UI::GetContentRegionAvail().y-footer)},0,
         UI::ImGuiWindowFlags_NoNavInputs|UI::ImGuiWindowFlags_AlwaysVerticalScrollbar);
-    const float stepX=(UI::GetContentRegionAvail().x-16.f)/gridColumns;
-    const float w=std::max(32.f,stepX-12.f), h=w*(screen.y*.84f)/(screen.x*.45f);
+    const auto layout=MakeThumbnailLayout(UI::GetContentRegionAvail().x,screen.x,screen.y,gridColumns,portraitThumbnails);
+    const float stepX=layout.stepX, w=layout.width, h=layout.height;
+    const UI::ImVec2 uv0{layout.uvLeft,0.f}, uv1{layout.uvRight,1.f};
+    thumbnailVisibleWidth=layout.uvRight-layout.uvLeft;
     const float textHeight=UI::GetTextLineHeightWithSpacing();
     const float stepY=h+16.f+(showNames?textHeight:0)+(showCounts?textHeight:0);
-    const int totalRows=(static_cast<int>(cards.size())+gridColumns-1)/gridColumns;
+    const int totalRows=(static_cast<int>(cards.size())+displayColumns-1)/displayColumns;
     float scroll=reset?0.f:UI::GetScrollY();
     const float viewport=std::max(1.f,UI::GetWindowHeight()-16.f);
     if(reset) UI::SetScrollY(0);
     if(moved || index!=before) {
-        const float y=(index/gridColumns)*stepY;
+        const float y=(index/displayColumns)*stepY;
         if(y<scroll) scroll=y; else if(y+stepY>scroll+viewport) scroll=y+stepY-viewport;
         scroll=std::max(0.f,scroll); UI::SetScrollY(scroll);
     }
@@ -336,8 +406,8 @@ void RenderBrowser(bool& addMissing) {
     std::vector<std::string> visible;
     const float origin=UI::GetCursorPosY();
     UI::BeginDisabled(saveBusy);
-    for(int row=start;row<finish;++row) for(int col=0;col<gridColumns;++col) {
-        const int n=row*gridColumns+col; if(n>=static_cast<int>(cards.size())) break;
+    for(int row=start;row<finish;++row) for(int col=0;col<displayColumns;++col) {
+        const int n=row*displayColumns+col; if(n>=static_cast<int>(cards.size())) break;
         const auto& p=cards[n];
         UI::SetCursorPos({8.f+col*stepX,origin+row*stepY});
         UI::BeginGroup();
@@ -347,8 +417,9 @@ void RenderBrowser(bool& addMissing) {
         if(p.photo==selected && !tabsFocused) UI::PushStyleColor(UI::ImGuiCol_Button,{.55f,.43f,.19f,1.f});
         // The overlaid trash X must be able to receive hover/clicks instead of
         // the full-size image button claiming that area first.
-        if(category=="#trash") UI::SetNextItemAllowOverlap();
-        const bool clicked=texture?UI::ImageButton(p.photo.c_str(),texture,{w,h}):UI::Button((std::string(Tr("Missing photo"))+"##"+p.photo).c_str(),{w,h});
+        const bool flagged=missingCheckMode && PresetHasMissingData(missingResults,p.photo);
+        if(category=="#trash" || flagged) UI::SetNextItemAllowOverlap();
+        const bool clicked=texture?UI::ImageButton(p.photo.c_str(),texture,{w,h},uv0,uv1):UI::Button((std::string(Tr("Missing photo"))+"##"+p.photo).c_str(),{w,h});
         if(p.photo==selected && !tabsFocused) UI::PopStyleColor();
         const bool hover=UI::IsItemHovered();
         const auto photoMin=UI::GetItemRectMin(), photoMax=UI::GetItemRectMax();
@@ -373,7 +444,14 @@ void RenderBrowser(bool& addMissing) {
             UI::ImDrawListManager::AddCircleFilled(draw,center,radius+1.5f,0xD0202020,16);
             UI::ImDrawListManager::AddCircleFilled(draw,center,radius,0xFFEBDD9A,16);
         }
-        if(!p.slotMask && label!=library.labels.end() && std::find(label->second.categories.begin(),label->second.categories.end(),"favorites")!=label->second.categories.end()) {
+        const auto pad=UI::GetStyle()->FramePadding;
+        const float missingRadius=std::clamp(w*.055f,8.f,15.f);
+        const float editedRadius=std::clamp(w*.024f,3.5f,5.5f);
+        const UI::ImVec2 missingCenter{photoMin.x+pad.x+missingRadius+3.f+(editedScope?editedRadius*2.f+8.f:0.f),photoMin.y+pad.y+missingRadius+3.f};
+        const float missingHalf=missingRadius+2.f;
+        const auto mouse=UI::GetIO()->MousePos;
+        const bool overMissing=flagged && mouse.x>=missingCenter.x-missingHalf && mouse.x<=missingCenter.x+missingHalf && mouse.y>=missingCenter.y-missingHalf && mouse.y<=missingCenter.y+missingHalf;
+        if(!p.slotMask && !p.accessories && label!=library.labels.end() && std::find(label->second.categories.begin(),label->second.categories.end(),"favorites")!=label->second.categories.end()) {
             auto* draw=UI::GetWindowDrawList();
             const float radius=std::clamp(w*.055f,8.f,15.f);
             const UI::ImVec2 center{photoMax.x-radius-6.f,photoMin.y+radius+6.f};
@@ -382,24 +460,24 @@ void RenderBrowser(bool& addMissing) {
             for(int k=0;k<10;++k) {const float angle=-std::numbers::pi_v<float>/2+k*std::numbers::pi_v<float>/5; const float r=k%2?radius*.43f:radius; points[k]={center.x+std::cos(angle)*r,center.y+std::sin(angle)*r};}
             for(int k=0;k<10;++k) UI::ImDrawListManager::AddLine(draw,points[k],points[(k+1)%10],0xFF55DFFF,2.f);
         }
-        if(hover) UI::SetTooltip("%s",p.name.c_str());
+        if(hover && !overMissing) UI::SetTooltip("%s",p.name.c_str());
         if(UI::IsItemClicked(1)) {contextPhoto=p.photo; strcpy_s(editName,p.name.c_str()); openEdit=true; selected=p.photo;}
         // Gamepad A is handled once above; avoid native-nav activation applying another card.
-        if(clicked && !UI::GetDragDropPayload() && !PadPressed(UI::ImGuiKey_GamepadFaceDown,false)) {selected=p.photo; tabsFocused=false; columnsFocused=false; queueApply(p);}
+        if(clicked && !overMissing && !UI::GetDragDropPayload() && !PadPressed(UI::ImGuiKey_GamepadFaceDown,false)) {selected=p.photo; tabsFocused=false; columnsFocused=false; layoutButtonFocused=false; missingCheckFocused=false; queueApply(p);}
         UI::PushStyleColor(UI::ImGuiCol_PopupBg,{.07f,.07f,.07f,1.f});
         // Only photo dragging gets extra tolerance; do not modify ImGui's global
         // threshold. A slight movement still releases as a normal ImageButton click.
         // IsMouseDragging uses the maximum distance since mouse-down, retaining
         // the drag once started even when the cursor moves back toward its origin.
         const float photoDragThreshold=std::max(36.f,UI::GetIO()->MouseDragThreshold);
-        if(libraryWritable && UI::IsMouseDragging(0,photoDragThreshold) && UI::BeginDragDropSource()) {
+        if(!missingCheckMode && libraryWritable && UI::IsMouseDragging(0,photoDragThreshold) && UI::BeginDragDropSource()) {
             UI::SetDragDropPayload("OUTFIT_PHOTO",p.photo.c_str(),p.photo.size()+1);
             UI::TextUnformatted(p.name.c_str());
-            if(texture) UI::Image(texture,{w*.5f,h*.5f});
+            if(texture) UI::Image(texture,{w*.5f,h*.5f},uv0,uv1);
             UI::EndDragDropSource();
         }
         UI::PopStyleColor();
-        if(libraryWritable && UI::BeginDragDropTarget()) {
+        if(!missingCheckMode && libraryWritable && UI::BeginDragDropTarget()) {
             if(const auto* payload=UI::AcceptDragDropPayload("OUTFIT_PHOTO",UI::ImGuiDragDropFlags_AcceptBeforeDelivery|UI::ImGuiDragDropFlags_AcceptNoDrawDefaultRect)) {
                 if(payload->Data && payload->DataSize>1 && payload->DataSize<512 && static_cast<const char*>(payload->Data)[payload->DataSize-1]=='\0') {
                     const std::string source(static_cast<const char*>(payload->Data));
@@ -419,6 +497,21 @@ void RenderBrowser(bool& addMissing) {
                 }
             }
             UI::EndDragDropTarget();
+        }
+        if(flagged) {
+            const auto cursor=UI::GetCursorPos();
+            UI::SetCursorScreenPos({missingCenter.x-missingHalf,missingCenter.y-missingHalf});
+            UI::BeginDisabled(!libraryWritable || category=="#trash");
+            if(UI::InvisibleButton(("##missingTrash"+p.photo).c_str(),{missingHalf*2.f,missingHalf*2.f}) && !UI::GetDragDropPayload()) moveMissingToTrash=p.photo;
+            const bool missingHovered=UI::IsItemHovered();
+            UI::EndDisabled();
+            auto* draw=UI::GetWindowDrawList();
+            UI::ImDrawListManager::AddCircleFilled(draw,missingCenter,missingHalf,missingHovered?0xF0404050:0xE0202020,20);
+            const float d=missingRadius*.65f;
+            UI::ImDrawListManager::AddLine(draw,{missingCenter.x-d,missingCenter.y-d},{missingCenter.x+d,missingCenter.y+d},0xFF8080FF,2.f);
+            UI::ImDrawListManager::AddLine(draw,{missingCenter.x-d,missingCenter.y+d},{missingCenter.x+d,missingCenter.y-d},0xFF8080FF,2.f);
+            if(missingHovered) UI::SetTooltip("%s",Tr("Move to Trash"));
+            UI::SetCursorPos(cursor);
         }
         if(category=="#trash") {
             const auto cursor=UI::GetCursorPos();
@@ -447,23 +540,33 @@ void RenderBrowser(bool& addMissing) {
     UI::EndDisabled();
     UI::SetCursorPos({8,origin+totalRows*stepY}); UI::Dummy({1,1});
     UI::EndChild();
+    if(!moveMissingToTrash.empty()) {
+        auto next=library; next.labels[moveMissingToTrash].deleted=true;
+        CommitLibrary(std::move(next));
+    }
+    if(autoPanel) {
+        std::scoped_lock lock(autoMutex);
+        for(const auto& photo:autoSlots) if(!photo.empty()) visible.push_back((std::filesystem::path("Data/SKSE/Plugins/OutfitGallery/Captures")/photo).generic_string());
+    }
     for(const auto& path:loaded) if(std::find(visible.begin(),visible.end(),path)==visible.end()) DisposePortraitView(path);
     loaded=std::move(visible);
     auto current=std::find_if(cards.begin(),cards.end(),[&](const auto& p){return p.photo==selected;});
     if(current!=cards.end()) UI::Text(Tr("%s  (%u items)"),current->name.c_str(),static_cast<unsigned>(current->items.size()));
     else UI::TextUnformatted(Tr("No outfits in this view."));
-    if(current!=cards.end() && current->slotMask) {UI::SameLine(); UI::TextUnformatted(Tr(current->accessories?"[Accessories]":"[Selected slots]"));}
+    if(current!=cards.end() && (current->slotMask || current->accessories)) {UI::SameLine(); UI::TextUnformatted(Tr(current->accessories?"[Accessories]":"[Selected slots]"));}
     UI::SameLine(0,24); UI::Text(Tr("%u outfits"),static_cast<unsigned>(cards.size()));
     if(openDelete) UI::OpenPopup(Label("Confirm permanent deletion"));
     if(UI::BeginPopupModal(Label("Confirm permanent deletion"),nullptr,UI::ImGuiWindowFlags_AlwaysAutoResize)) {
-        UI::TextWrapped(Tr("Permanently delete these presets and photos? This cannot be undone."));
+        UI::TextWrapped(Tr("Permanently delete these presets, photos and their edit backups? This cannot be undone."));
         UI::Text(Tr("%u outfits"),static_cast<unsigned>(deletePhotos.size()));
         if(UI::Button(Label("Delete permanently"))) {
             try {
                 for(const auto& photo:deletePhotos) {
                     const auto path=(std::filesystem::path("Data/SKSE/Plugins/OutfitGallery/Captures")/photo).generic_string();
                     DisposePortraitView(path);
-                    DeleteTrashedFiles(photo,library,"Data/SKSE/Plugins/OutfitGallery");
+                    DeletionTrace trace;
+                    if(DetailEnabled()) trace=[](const std::string& line){GALLERY_DIAG("OG-DIAG trash {}",line);};
+                    DeleteTrashedFiles(photo,library,"Data/SKSE/Plugins/OutfitGallery",std::move(trace));
                     auto next=library; next.labels.erase(photo); std::erase(next.order,photo);
                     if(!CommitLibrary(std::move(next))) break;
                 }
@@ -477,6 +580,19 @@ void RenderBrowser(bool& addMissing) {
     }
     if(openEdit) UI::OpenPopup("Outfit actions");
     if(UI::BeginPopup("Outfit actions")) {
+        if(missingCheckMode && !missingCheckPending && missingCheckError.empty()) {
+            const auto result=missingResults.find(contextPhoto);
+            if(result==missingResults.end()) UI::TextWrapped("%s",Tr("Not checked in this snapshot."));
+            else if(!result->second.empty()) {
+                UI::TextColored({1.f,.5f,.4f,1.f},"%s",Tr("Missing or changed equipment data"));
+                UI::BeginChild("Missing details",{540.f,std::min(200.f,UI::GetTextLineHeightWithSpacing()*(1.f+result->second.size()*2.f))},0);
+                for(const auto& item:result->second) {
+                    UI::TextWrapped("%s",item.name.c_str());
+                    UI::TextWrapped("%s / %06X",item.plugin.c_str(),item.localID);
+                }
+                UI::EndChild(); UI::Separator();
+            }
+        }
         UI::InputText(Label("Name"),editName,sizeof(editName));
         if(UI::Button(Label("Rename")) && editName[0]) {auto next=library; next.labels[contextPhoto].name=editName; CommitLibrary(std::move(next));}
         UI::Separator();
@@ -486,8 +602,9 @@ void RenderBrowser(bool& addMissing) {
             if(it!=library.categories.end()) {newCategory=false; editCategory=category; strcpy_s(tabName,it->name.c_str()); openTab=true; UI::CloseCurrentPopup();}
         }
         bool partialContext=false;
-        {std::scoped_lock lock(presetsMutex); for(const auto& p:presets) if(p.photo==contextPhoto) partialContext=p.slotMask!=0;}
-        if(UI::Button(Label("Exchange slots"))) {
+        {std::scoped_lock lock(presetsMutex); for(const auto& p:presets) if(p.photo==contextPhoto) partialContext=p.slotMask!=0 || p.accessories;}
+        if(UI::Button(Label("Equipment management"))) {
+            {std::scoped_lock lock(editMutex);editSnapshot={};}
             {std::scoped_lock lock(presetsMutex);
                 for(const auto& p:presets) if(p.photo==contextPhoto) {scopeEditing=p; break;}
                 scopeRequest=scopeEditing; scopeReady=false; scopeMasks.clear(); scopeError.clear();
@@ -495,8 +612,12 @@ void RenderBrowser(bool& addMissing) {
             const auto label=library.labels.find(contextPhoto);
             scopeDraftInitialized=label!=library.labels.end() && label->second.exchangeSlots.has_value();
             scopeDraft=scopeDraftInitialized ? *label->second.exchangeSlots : 0;
+            scopeSlotless=scopeDraftInitialized?label->second.exchangeSlotless:std::vector<std::string>{};
             command=10; openScope=true; UI::CloseCurrentPopup();
         }
+        bool contentEdited=false;
+        {std::scoped_lock lock(presetsMutex);for(const auto& p:presets)if(p.photo==contextPhoto)contentEdited=p.equipmentEdited;}
+        if(contentEdited) {UI::SameLine();UI::TextUnformatted(Tr("Equipment edited"));}
         if(!partialContext) UI::TextUnformatted(Tr("Categories (multiple allowed)"));
         if(!partialContext) for(const auto& c:library.categories) {
             const auto found=library.labels.find(contextPhoto);
@@ -513,46 +634,69 @@ void RenderBrowser(bool& addMissing) {
         if(UI::Button(Label("Close"))) UI::CloseCurrentPopup();
         UI::EndPopup();
     }
-    if(openScope) UI::OpenPopup(Label("Exchange slots"));
-    if(UI::BeginPopupModal(Label("Exchange slots"),nullptr,UI::ImGuiWindowFlags_AlwaysAutoResize)) {
+    if(openScope) UI::OpenPopup(Label("Equipment management"));
+    PrepareEquipmentDialog();
+    bool managementOpen=true;
+    if(UI::BeginPopupModal(Label("Equipment management"),editPending?nullptr:&managementOpen,UI::ImGuiWindowFlags_NoSavedSettings)) {
+        UI::BeginChild("Management body",{0,-UI::GetFrameHeightWithSpacing()-UI::GetStyle()->ItemSpacing.y});
         UI::TextUnformatted(scopeEditing.name.c_str());
+        if(scopeEditing.equipmentEdited) {UI::SameLine();UI::TextUnformatted(Tr("Equipment edited"));}
+        // Measure the parent before entering the auto-sized section. Reserve the
+        // controls below; give the remaining height to the equipment list.
+        const float row=UI::GetFrameHeightWithSpacing();
+        const float lowerRows=(scopeEditing.slotMask || scopeEditing.accessories)?10.f:9.f;
+        const float scopeChoicesHeight=std::max(row*4.f,UI::GetContentRegionAvail().y-row*lowerRows-UI::GetStyle()->ItemSpacing.y*8.f);
+        UI::Spacing();BeginEquipmentSection("Scope section","Exchange slots",false);
         bool readyScope; std::vector<std::uint32_t> masks; std::string error;
         {std::scoped_lock lock(presetsMutex); readyScope=scopeReady; masks=scopeMasks; error=scopeError;}
         if(!readyScope) UI::TextUnformatted(Tr("Loading equipment slots..."));
         else if(!error.empty()) UI::TextWrapped("%s",StatusText(error).c_str());
         else {
             const auto available=AvailableExchangeSlots(scopeEditing,masks);
-            if(!scopeDraftInitialized) {scopeDraft=available; scopeDraftInitialized=true;}
-            UI::BeginChild("Scope choices",{600,280});
+            std::vector<std::string> allSlotless;
+            for(std::size_t n=0;n<masks.size();++n) if(!masks[n] && scopeEditing.items[n].kind=="armor") allSlotless.push_back(ExchangeItemKey(scopeEditing.items[n]));
+            if(!scopeDraftInitialized) {scopeDraft=available;scopeSlotless=allSlotless;scopeDraftInitialized=true;}
+            UI::BeginChild("Scope choices",{0,scopeChoicesHeight});
             for(unsigned bit=0;bit<32;++bit) if(available&(1u<<bit)) {
                 bool checked=(scopeDraft&(1u<<bit))!=0;
                 if(UI::Checkbox(std::to_string(bit+30).c_str(),&checked)) {
                     scopeDraft=ToggleExchangeSlot(scopeDraft,1u<<bit,checked,masks);
                 }
-                for(std::size_t n=0;n<masks.size();++n) if(masks[n]&(1u<<bit)) {UI::SameLine(); UI::TextUnformatted(scopeEditing.items[n].name.c_str());}
+                for(std::size_t n=0;n<masks.size();++n) if(masks[n]&(1u<<bit)) {UI::SameLine(); UI::TextWrapped("%s",scopeEditing.items[n].name.c_str());}
             }
             for(std::size_t n=0;n<masks.size();++n) if(!masks[n] && scopeEditing.items[n].kind=="armor") {
-                UI::TextUnformatted(scopeEditing.items[n].name.c_str());
-                UI::SameLine(); UI::TextUnformatted(Tr("No equipment slots (not exchanged)"));
+                const auto key=ExchangeItemKey(scopeEditing.items[n]);
+                bool checked=std::find(scopeSlotless.begin(),scopeSlotless.end(),key)!=scopeSlotless.end();
+                UI::PushID(static_cast<int>(n));
+                if(UI::Checkbox(scopeEditing.items[n].name.c_str(),&checked)) {if(checked) scopeSlotless.push_back(key);else std::erase(scopeSlotless,key);}
+                UI::PopID();UI::SameLine();UI::TextUnformatted(Tr("Slotless equipment"));
             }
             UI::EndChild();
-            if(UI::Button(Label("Select all slots"))) scopeDraft=available;
-            UI::SameLine(); if(UI::Button(Label("Clear slot selection"))) scopeDraft=0;
-            if(!scopeDraft) UI::TextUnformatted(Tr("No exchange slots selected. Equipment unchanged."));
+            if(UI::Button(Label("Select all slots"))) {scopeDraft=available;scopeSlotless=allSlotless;}
+            UI::SameLine(); if(UI::Button(Label("Clear slot selection"))) {scopeDraft=0;scopeSlotless.clear();}
+            if(!scopeDraft && scopeSlotless.empty()) UI::TextUnformatted(Tr("No exchange slots selected. Equipment unchanged."));
             if(UI::Button(Label("Save exchange slots"))) {
-                auto next=library; next.labels[scopeEditing.photo].exchangeSlots=scopeDraft;
+                auto next=library; next.labels[scopeEditing.photo].exchangeSlots=scopeDraft;next.labels[scopeEditing.photo].exchangeSlotless=scopeSlotless;
                 if(CommitLibrary(std::move(next))) {SetStatus("Exchange slots saved. Applies on the next outfit change."); UI::CloseCurrentPopup();}
             }
         }
-        if(UI::Button(Label("Restore original scope"))) {
-            auto next=library; next.labels[scopeEditing.photo].exchangeSlots.reset();
+        if(UI::Button(Label("Restore original slot range"))) {
+            auto next=library; next.labels[scopeEditing.photo].exchangeSlots.reset();next.labels[scopeEditing.photo].exchangeSlotless.clear();
             if(CommitLibrary(std::move(next))) UI::CloseCurrentPopup();
         }
-        UI::SameLine(); if(UI::Button(Label("Cancel"))) UI::CloseCurrentPopup();
-        UI::Separator();
-        UI::TextWrapped(Tr("Only selected slots are exchanged. The original preset and photo are kept."));
+        UI::EndChild();UI::Spacing();UI::Spacing();
+        BeginEquipmentSection("Content section","Saved equipment",true);
+        if(RenderPresetEditor(scopeEditing,libraryWritable && !editPending)) UI::CloseCurrentPopup();
+        UI::EndChild();UI::Spacing();
+        if(UI::CollapsingHeader(Label("Equipment help"))) {
+        UI::TextWrapped("%s",Tr("Slot selection changes only the exchange range. Equipment editing changes the saved outfit contents."));
         UI::TextWrapped(Tr("Items sharing a slot change together. Multi-slot items require all their slots."));
         UI::TextWrapped(Tr("Worn items overlapping selected slots are replaced as whole items, including their other slots."));
+        }
+        UI::EndChild();
+        UI::BeginDisabled(editPending);
+        if(UI::Button(Label("Cancel"))) UI::CloseCurrentPopup();
+        UI::EndDisabled();
         UI::EndPopup();
     }
     if(openTab) UI::OpenPopup("Edit category");
